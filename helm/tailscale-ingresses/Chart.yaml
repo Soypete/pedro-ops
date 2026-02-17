@@ -1,0 +1,10 @@
+apiVersion: v2
+name: tailscale-ingresses
+description: Tailscale LoadBalancer services for exposing cluster services
+type: application
+version: 0.1.0
+appVersion: "1.0"
+
+maintainers:
+  - name: soypete
+    email: captainnobody1@gmail.com

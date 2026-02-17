@@ -1,0 +1,100 @@
+# Kubernetes secrets (never commit real secrets!)
+k8s/**/oauth-secret.yaml
+k8s/**/secrets.yaml
+k8s/**/*secret*.yaml
+!k8s/**/*secret*.yaml.example
+
+# Kubeconfig files
+*.kubeconfig
+kubeconfig
+.kube/
+
+# Foundry
+.foundry/
+foundry-repo/
+
+# Environment files
+.env
+.env.local
+.env.production
+*.env
+!.env.example
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+.cache/
+
+# Logs
+*.log
+logs/
+
+# Backup files
+*.bak
+*.backup
+
+# SSH keys
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Terraform (if used in future)
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Helm
+*.tgz
+helm/*/charts/
+
+# Python (for scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+
+# Go (archived, but keep for safety)
+vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test coverage
+coverage.txt
+*.out
+
+# Build artifacts
+dist/
+build/
+target/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+.directory
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+foundry/stack.yaml
+
+# Secrets configuration (contains 1Password references)
+secrets/secrets-map.yaml

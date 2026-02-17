@@ -1,3 +1,4 @@
+// package types defines the data structures for OpenAI API responses and metrics.
 package types
 
 import "time"
@@ -67,18 +68,21 @@ type CompletionTokensDetails struct {
 
 // ResponseMetrics contains timing and performance metrics for API calls
 type ResponseMetrics struct {
-	RequestStartTime  time.Time
+	//RequestStartTime is the time that the handler  that calls llm is called.
+	RequestStartTime time.Time
+	// ResponseStartTime is the time that the llm is called.
 	ResponseStartTime time.Time
-	FirstTokenTime    time.Time
-	ResponseEndTime   time.Time
-	Model             string
-	PromptTokens      int
-	CompletionTokens  int
-	TotalTokens       int
-	RequestSize       int64
-	ResponseSize      int64
-	Endpoint          string
-	StatusCode        int
+	// FirstTokenTime time that llm response is recieved.
+	FirstTokenTime time.Time
+	// ResponseEndTime after handler completes
+	ResponseEndTime  time.Time
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	ResponseSize     int64
+	Endpoint         string
+	StatusCode       int
 }
 
 // CalculateMetrics computes derived metrics from the response data
@@ -113,7 +117,6 @@ func (rm *ResponseMetrics) CalculateMetrics() map[string]float64 {
 	metrics["total_tokens"] = float64(rm.TotalTokens)
 
 	// Request/Response sizes
-	metrics["request_size_bytes"] = float64(rm.RequestSize)
 	metrics["response_size_bytes"] = float64(rm.ResponseSize)
 
 	return metrics

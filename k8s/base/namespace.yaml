@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pedro-ops
+  labels:
+    name: pedro-ops
+    app.kubernetes.io/name: pedro-ops
