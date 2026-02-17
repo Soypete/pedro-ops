@@ -1,0 +1,126 @@
+# Foundry Stack Configuration
+#
+# This file contains your cluster configuration and installed component settings.
+#
+# COMPONENT VALUES WARNING:
+# The 'values' section under each component contains Helm chart values.
+# Modifying these values may change expected behavior and break the component.
+# The CLI tool has no validation for custom values - proceed with caution.
+# To reset a component to defaults, delete its 'values' section and reinstall.
+#
+network:
+    gateway: 100.64.0.1
+    netmask: 255.192.0.0
+dns:
+    infrastructure_zones: []
+    kubernetes_zones: []
+    forwarders:
+        - 8.8.8.8
+        - 1.1.1.1
+    backend: gsqlite3
+    api_key: ${secret:dns:api_key}
+cluster:
+    name: pedro-ops-cluster
+    domain: soypetetech.local
+    primary_domain: soypetetech.local
+    vip: 100.81.89.100
+    allow_cgnat_vip: true
+    use_tailscale: true
+components:
+    cert-manager:
+        enabled: true
+    dns:
+        installed: true
+    gateway-api:
+        controller: contour
+        enabled: true
+    k3s:
+        version: latest
+        enabled: true
+        tls_san:
+            - 100.81.89.62
+            - 100.81.89.100
+            - soypetetech.local
+    longhorn:
+        default_storage_class: true
+        enabled: true
+        host_path: /data/persistent-storage/longhorn
+        replicas: 2
+    openbao:
+        hosts:
+            - control-plane
+        enabled: true
+        installed: true
+        storage:
+            backend: file
+            path: /data/persistent-storage/openbao
+    powerdns:
+        hosts:
+            - control-plane
+        enabled: true
+    seaweedfs:
+        enabled: true
+        storage:
+            size: 500Gi
+    tailscale:
+        oauth_client_id: ${secret:foundry-core/tailscale:client_id}
+        oauth_client_secret: ${secret:foundry-core/tailscale:client_secret}
+        tags:
+            - tag:k8s-pedro-ops
+            - tag:production
+    zot:
+        hosts:
+            - control-plane
+        enabled: true
+        installed: true
+        storage:
+            size: 100Gi
+observability:
+    prometheus:
+        retention: 15d
+    loki:
+        retention: 7d
+    grafana: {}
+storage:
+    backend: longhorn
+hosts:
+    - hostname: control-plane
+      address: 100.81.89.62
+      port: 22
+      user: root
+      sshkeyset: true
+      roles:
+        - openbao
+        - dns
+        - zot
+        - cluster-control-plane
+      state: ssh-configured
+      labels: {}
+    - hostname: worker-1
+      address: 100.70.90.12
+      port: 22
+      user: root
+      sshkeyset: true
+      roles:
+        - cluster-worker
+      state: ssh-configured
+      labels: {}
+    - hostname: worker-2
+      address: 100.125.196.1
+      port: 22
+      user: root
+      sshkeyset: true
+      roles:
+        - cluster-worker
+      state: ssh-configured
+      labels: {}
+setup_state:
+    network_planned: true
+    network_validated: true
+    openbao_installed: true
+    openbao_initialized: true
+    dns_installed: true
+    dns_zones_created: true
+    zot_installed: true
+    k8s_installed: false  # Set to false to allow workers to join
+    stack_complete: false

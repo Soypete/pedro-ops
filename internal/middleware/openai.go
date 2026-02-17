@@ -1,9 +1,7 @@
 package middleware
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -11,7 +9,7 @@ import (
 	"time"
 
 	"github.com/soypete/pedro-ops/internal/metrics"
-	"github.com/soypete/pedro-ops/internal/types"
+	"github.com/soypete/pedro-ops/types"
 )
 
 const (
@@ -28,111 +26,23 @@ type OpenAIMiddleware struct {
 }
 
 // NewOpenAIMiddleware creates a new OpenAI middleware instance
-func NewOpenAIMiddleware(metricsClient *metrics.Client) *OpenAIMiddleware {
+func NewOpenAIMiddleware() *OpenAIMiddleware {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		log.Printf("Warning: OPENAI_API_KEY not set")
+		// log.Printf("Warning: OPENAI_API_KEY not set")
+		apiKey = "test"
 	}
 
 	return &OpenAIMiddleware{
-		metricsClient: metricsClient,
-		apiKey:        apiKey,
+		apiKey: apiKey,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
 	}
 }
 
-// HandleCompletions processes chat completion requests
-func (m *OpenAIMiddleware) HandleCompletions(w http.ResponseWriter, r *http.Request) {
-	m.handleRequest(w, r, completionsEndpoint, "completions")
-}
-
-// HandleEmbeddings processes embedding requests
-func (m *OpenAIMiddleware) HandleEmbeddings(w http.ResponseWriter, r *http.Request) {
-	m.handleRequest(w, r, embeddingsEndpoint, "embeddings")
-}
-
-func (m *OpenAIMiddleware) handleRequest(w http.ResponseWriter, r *http.Request, endpoint, endpointName string) {
-	responseMetrics := &types.ResponseMetrics{
-		RequestStartTime: time.Now(),
-		Endpoint:         endpointName,
-	}
-
-	// Read the request body
-	requestBody, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
-		return
-	}
-	r.Body.Close()
-
-	responseMetrics.RequestSize = int64(len(requestBody))
-
-	// Create request to OpenAI
-	openaiURL := openaiBaseURL + endpoint
-	req, err := http.NewRequest(r.Method, openaiURL, bytes.NewReader(requestBody))
-	if err != nil {
-		http.Error(w, "Failed to create request", http.StatusInternalServerError)
-		return
-	}
-
-	// Copy headers
-	for key, values := range r.Header {
-		for _, value := range values {
-			req.Header.Add(key, value)
-		}
-	}
-
-	// Set OpenAI API key if not already present
-	if m.apiKey != "" && req.Header.Get("Authorization") == "" {
-		req.Header.Set("Authorization", "Bearer "+m.apiKey)
-	}
-
-	responseMetrics.ResponseStartTime = time.Now()
-
-	// Make the request to OpenAI
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		log.Printf("Error calling OpenAI API: %v", err)
-		http.Error(w, "Failed to call OpenAI API", http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	responseMetrics.StatusCode = resp.StatusCode
-
-	// Read the response body
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		http.Error(w, "Failed to read response", http.StatusInternalServerError)
-		return
-	}
-
-	responseMetrics.ResponseSize = int64(len(responseBody))
-	responseMetrics.ResponseEndTime = time.Now()
-
-	// Extract metrics from response
-	m.extractMetrics(responseBody, responseMetrics, endpointName)
-
-	// Copy response headers
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
-
-	// Set response status and write body
-	w.WriteHeader(resp.StatusCode)
-	if _, err := w.Write(responseBody); err != nil {
-		log.Printf("Error writing response: %v", err)
-	}
-
-	// Record metrics
-	m.metricsClient.RecordMetrics(responseMetrics)
-}
-
-func (m *OpenAIMiddleware) extractMetrics(responseBody []byte, metrics *types.ResponseMetrics, endpoint string) {
+// ExtractMetrics extracts metrics from the response body and updates the response metrics struct for the given endpoint.
+func (m *OpenAIMiddleware) ExtractMetrics(responseBody []byte, metrics *types.ResponseMetrics, endpoint string) {
 	switch endpoint {
 	case "completions":
 		m.extractCompletionMetrics(responseBody, metrics)

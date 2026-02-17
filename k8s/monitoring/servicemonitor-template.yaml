@@ -1,0 +1,35 @@
+# ServiceMonitor Template for Prometheus Operator
+# Copy this template to create custom service monitors for your applications
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: example-app
+  namespace: pedro-ops
+  labels:
+    app: example-app
+    prometheus: kube-prometheus
+spec:
+  # Select services to monitor
+  selector:
+    matchLabels:
+      app: example-app
+
+  # Endpoints to scrape
+  endpoints:
+    - port: metrics  # Named port from Service
+      interval: 30s
+      path: /metrics
+      scheme: http
+
+      # Optional: relabel configs
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+
+  # Namespace selector (optional, defaults to same namespace)
+  namespaceSelector:
+    matchNames:
+      - pedro-ops

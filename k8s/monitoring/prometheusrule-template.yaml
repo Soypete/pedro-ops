@@ -1,0 +1,51 @@
+# PrometheusRule Template for alerting
+# Copy this template to create custom alerting rules
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: example-alerts
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: example-app.rules
+      interval: 30s
+      rules:
+        # Example: High error rate alert
+        - alert: HighErrorRate
+          expr: |
+            rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            component: example-app
+          annotations:
+            summary: "High error rate detected"
+            description: "{{ $labels.instance }} has error rate above 5%"
+
+        # Example: Service down alert
+        - alert: ServiceDown
+          expr: |
+            up{job="example-app"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: example-app
+          annotations:
+            summary: "Service is down"
+            description: "{{ $labels.instance }} is not responding"
+
+        # Example: High latency alert
+        - alert: HighLatency
+          expr: |
+            histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+          for: 5m
+          labels:
+            severity: warning
+            component: example-app
+          annotations:
+            summary: "High latency detected"
+            description: "95th percentile latency is {{ $value }}s"

@@ -1,0 +1,31 @@
+{{- range .Values.services }}
+{{- if .enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}-tailscale
+  namespace: {{ .namespace }}
+  annotations:
+    tailscale.com/expose: "true"
+    tailscale.com/hostname: {{ .hostname }}
+    tailscale.com/tags: {{ join "," $.Values.tailscale.tags }}
+    {{- if .tailnetTargetIP }}
+    tailscale.com/tailnet-target-ip: {{ .tailnetTargetIP }}
+    {{- end }}
+    {{- if .tailnetTargetFQDN }}
+    tailscale.com/tailnet-target-fqdn: {{ .tailnetTargetFQDN }}
+    {{- end }}
+  labels:
+    app: {{ .name }}-tailscale-ingress
+    managed-by: helm
+    chart: {{ $.Chart.Name }}-{{ $.Chart.Version }}
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    {{- toYaml .selector | nindent 4 }}
+  ports:
+    {{- toYaml .ports | nindent 4 }}
+{{- end }}
+{{- end }}
