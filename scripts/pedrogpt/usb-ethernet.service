@@ -1,0 +1,14 @@
+[Unit]
+Description=USB Ethernet Setup
+Documentation=https://github.com/Soypete/pedro-ops
+After=network-pre.target
+Before=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/ip link set enx9c69d319a411 up
+ExecStart=/usr/sbin/dhcpcd enx9c69d319a411
+
+[Install]
+WantedBy=multi-user.target
