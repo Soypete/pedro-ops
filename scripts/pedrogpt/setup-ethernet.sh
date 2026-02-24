@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
 # setup-ethernet.sh
 # Installs and enables the USB ethernet systemd service on pedrogpt (root@pedrogpt).
-# Run this script once after first boot or after OS reinstall.
-#
-# Usage: sudo bash setup-ethernet.sh
-#
-# The interface enx9c69d319a411 is the USB ethernet adapter providing LAN
-# connectivity. This script makes it persistent across reboots without
-# relying on NetworkManager.
+# Self-contained: the unit file is embedded below.
+# Run: sudo bash setup-ethernet.sh
 
 set -euo pipefail
 
 INTERFACE="enx9c69d319a411"
 SERVICE_NAME="usb-ethernet.service"
-SERVICE_SRC="$(dirname "$0")/${SERVICE_NAME}"
 SERVICE_DST="/etc/systemd/system/${SERVICE_NAME}"
 
 if [[ $EUID -ne 0 ]]; then
@@ -32,9 +26,25 @@ if ! command -v dhcpcd &>/dev/null; then
   apt-get install -y dhcpcd5
 fi
 
-# Copy unit file
+# Write unit file inline (self-contained, no sidecar file needed)
 echo "Installing ${SERVICE_NAME} to ${SERVICE_DST}..."
-cp "${SERVICE_SRC}" "${SERVICE_DST}"
+cat > "${SERVICE_DST}" <<'UNIT'
+[Unit]
+Description=USB Ethernet Setup
+Documentation=https://github.com/Soypete/pedro-ops
+After=network-pre.target
+Before=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/ip link set enx9c69d319a411 up
+ExecStart=/usr/sbin/dhcpcd enx9c69d319a411
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 chmod 644 "${SERVICE_DST}"
 
 # Reload and enable
