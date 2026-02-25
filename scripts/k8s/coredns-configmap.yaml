@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health
+        ready
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+          pods insecure
+          fallthrough in-addr.arpa ip6.arpa
+        }
+        hosts /etc/coredns/NodeHosts {
+          ttl 60
+          reload 15s
+          fallthrough
+        }
+        prometheus :9153
+        cache 30
+        loop
+        reload
+        loadbalance
+        import /etc/coredns/custom/*.override
+        forward . 8.8.8.8 1.1.1.1
+    }
+    import /etc/coredns/custom/*.server
+  NodeHosts: |
+    192.168.1.128 blue1
+    192.168.1.11 blue2
+    192.168.1.253 refurb
+    52.8.172.168 aws-0-us-west-1.pooler.supabase.com
+    52.8.172.168 db.xafzfaqyjeetonxelopw.supabase.co
+    54.177.55.191 aws-0-us-west-1.pooler.supabase.com

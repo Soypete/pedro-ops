@@ -1,0 +1,26 @@
+# k3s container registry configuration
+# Place this file at /etc/rancher/k3s/registries.yaml on all cluster nodes
+# Then restart k3s (control plane) or k3s-agent (worker nodes)
+#
+# Nodes:
+#   blue1 (control plane): 100.81.89.62 / 192.168.1.128
+#   blue2 (worker):        100.70.90.12 / 192.168.1.11
+#   refurb (worker):       100.125.196.1 / 192.168.1.253
+#
+# ZOT registry runs on blue1 at 100.81.89.62:5000 (HTTP, no auth)
+
+mirrors:
+    docker.io:
+        endpoint:
+            - http://100.81.89.62:5000
+    ghcr.io:
+        endpoint:
+            - http://100.81.89.62:5000
+    "100.81.89.62:5000":
+        endpoint:
+            - http://100.81.89.62:5000
+
+configs:
+    "100.81.89.62:5000":
+        tls:
+            insecure_skip_verify: true
