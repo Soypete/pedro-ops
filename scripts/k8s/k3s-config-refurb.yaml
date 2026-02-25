@@ -1,0 +1,5 @@
+# k3s agent config for refurb (worker)
+# Place at: /etc/rancher/k3s/config.yaml
+# Then restart: systemctl restart k3s-agent
+
+node-ip: 192.168.1.253

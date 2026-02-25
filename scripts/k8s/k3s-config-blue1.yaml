@@ -1,0 +1,9 @@
+# k3s server config for blue1 (control plane)
+# Place at: /etc/rancher/k3s/config.yaml
+# Then restart: systemctl restart k3s
+#
+# IMPORTANT: node-ip must be the LAN IP, NOT 100.118.20.111 (pedro-ops-api Tailscale subnet IP).
+# If k3s picks 100.118.20.111 as node-ip, flannel binds its VXLAN VTEP to that IP which
+# routes through Tailscale from worker nodes, breaking cross-node pod networking.
+
+node-ip: 192.168.1.128
