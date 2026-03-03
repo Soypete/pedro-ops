@@ -1,0 +1,48 @@
+{
+  "// NOTE": "This is an example ACL policy for Tailscale admin console",
+  "// Instructions": "Copy this content to Tailscale admin console → Access Controls",
+
+  "tagOwners": {
+    "tag:k8s-operator": [],
+    "tag:k8s-pedro-ops": ["tag:k8s-operator"],
+    "tag:gpu-inference": []
+  },
+
+  "grants": [
+    {
+      "src": ["tag:k8s-operator"],
+      "dst": ["tag:k8s-pedro-ops"],
+      "op": "is-owner"
+    }
+  ],
+
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["tag:k8s-pedro-ops"],
+      "dst": ["tag:gpu-inference:*"],
+      "comment": "Allow pedro-ops cluster to connect to GPU inference machine"
+    },
+    {
+      "action": "accept",
+      "src": ["tag:gpu-inference"],
+      "dst": ["tag:k8s-pedro-ops:*"],
+      "comment": "Allow GPU machine to connect back to cluster"
+    },
+    {
+      "action": "accept",
+      "src": ["autogroup:admin"],
+      "dst": ["*:*"],
+      "comment": "Admins can access everything"
+    }
+  ],
+
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["autogroup:admin"],
+      "dst": ["tag:k8s-pedro-ops", "tag:gpu-inference"],
+      "users": ["root", "autogroup:nonroot"]
+    }
+  ]
+}

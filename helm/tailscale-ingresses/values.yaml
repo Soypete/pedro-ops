@@ -1,0 +1,38 @@
+# Tailscale Ingress Configuration
+# Exposes cluster services via Tailscale VPN
+
+# Global Tailscale tags applied to all services
+tailscale:
+  tags:
+    - tag:k8s-pedro-ops
+    - tag:production
+
+# Services to expose via Tailscale
+services:
+  # Analytics ingress (Contour/Metabase)
+  - name: analytics
+    enabled: true
+    hostname: analytics  # Creates analytics.tail6fbc5.ts.net
+    namespace: projectcontour
+    selector:
+      app.kubernetes.io/name: contour
+      app.kubernetes.io/component: envoy
+    ports:
+      - name: http
+        port: 80
+        targetPort: http
+      - name: https
+        port: 443
+        targetPort: https
+
+  # PostgreSQL (example - disabled by default)
+  # - name: postgres
+  #   enabled: false
+  #   hostname: postgres
+  #   namespace: default
+  #   selector:
+  #     app: postgresql
+  #   ports:
+  #     - name: postgresql
+  #       port: 5432
+  #       targetPort: 5432

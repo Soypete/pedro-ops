@@ -1,0 +1,19 @@
+apiVersion: tailscale.com/v1alpha1
+kind: Connector
+metadata:
+  name: gpu-inference-connector
+  namespace: tailscale
+spec:
+  # Tag this connector with the pedro-ops tag
+  tags:
+    - tag:k8s-pedro-ops
+
+  # Advertise Tailscale CGNAT range to enable connectivity
+  # to external GPU machine on the same tailnet
+  subnetRouter:
+    advertiseRoutes:
+      - "100.0.0.0/8"  # Tailscale CGNAT range
+
+  # Optional: Exit node configuration
+  # Uncomment to make this connector act as an exit node
+  # exitNode: true
