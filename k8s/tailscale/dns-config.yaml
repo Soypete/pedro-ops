@@ -1,0 +1,34 @@
+apiVersion: tailscale.com/v1alpha1
+kind: DNSConfig
+metadata:
+  name: ts-dns
+  namespace: tailscale
+spec:
+  nameserver:
+    image:
+      repo: tailscale/k8s-nameserver
+      tag: unstable
+
+---
+# CoreDNS ConfigMap Patch
+# This configures CoreDNS to forward .ts.net queries to Tailscale nameserver
+#
+# Apply this after Tailscale nameserver is running:
+# 1. Get Tailscale DNS service IP:
+#    kubectl get svc -n tailscale
+# 2. Edit CoreDNS Configmap:
+#    kubectl edit configmap coredns -n kube-system
+# 3. Add the following block to the Corefile:
+#
+#    ts.net:53 {
+#      errors
+#      cache 30
+#      forward . <TAILSCALE_DNS_SERVICE_IP>
+#    }
+#
+# Example:
+#    ts.net:53 {
+#      errors
+#      cache 30
+#      forward . 10.43.123.45
+#    }

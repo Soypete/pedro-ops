@@ -1,0 +1,153 @@
+name: Validate Kubernetes Manifests
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'k8s/**'
+      - 'helm/**'
+      - 'foundry/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'k8s/**'
+      - 'helm/**'
+      - 'foundry/**'
+
+jobs:
+  validate-manifests:
+    name: Validate Manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Setup kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+          kustomize version
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: Validate Kubernetes base manifests
+        run: |
+          echo "Validating base manifests..."
+          kubectl kustomize k8s/base > /tmp/base-output.yaml
+          kubectl apply --dry-run=client -f /tmp/base-output.yaml
+
+      - name: Validate Kubernetes production overlay
+        run: |
+          echo "Validating production overlay..."
+          kubectl kustomize k8s/overlays/production > /tmp/production-output.yaml
+          kubectl apply --dry-run=client -f /tmp/production-output.yaml
+
+      - name: Validate Tailscale manifests
+        run: |
+          echo "Validating Tailscale manifests..."
+          kubectl apply --dry-run=client -f k8s/tailscale/namespace.yaml
+          kubectl apply --dry-run=client -f k8s/tailscale/connector.yaml
+          kubectl apply --dry-run=client -f k8s/tailscale/dns-config.yaml
+
+      - name: Validate monitoring manifests
+        if: hashFiles('k8s/monitoring/*.yaml') != ''
+        run: |
+          echo "Validating monitoring manifests..."
+          kubectl apply --dry-run=client -f k8s/monitoring/
+
+      - name: Lint Helm charts
+        if: hashFiles('helm/**') != ''
+        run: |
+          echo "Linting Helm charts..."
+          for chart in helm/*/; do
+            if [ -f "$chart/Chart.yaml" ]; then
+              echo "Linting $chart"
+              helm lint "$chart"
+            fi
+          done
+
+      - name: Setup Python for yamllint
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Lint YAML files
+        run: |
+          cat > .yamllint.yml << 'EOF'
+          extends: default
+          rules:
+            line-length:
+              max: 120
+              level: warning
+            indentation:
+              spaces: 2
+            comments:
+              min-spaces-from-content: 1
+          ignore: |
+            .github/
+            foundry-repo/
+          EOF
+          yamllint -c .yamllint.yml k8s/
+
+      - name: Validate Foundry config (syntax only)
+        run: |
+          echo "Checking Foundry YAML syntax..."
+          python3 -c "import yaml; yaml.safe_load(open('foundry/stack.yaml'))"
+
+      - name: Check for secrets in code
+        run: |
+          echo "Checking for accidentally committed secrets..."
+          ! grep -r "client_secret:\s*['\"].*['\"]" k8s/ || (echo "Found potential secrets!" && exit 1)
+          ! grep -r "password:\s*['\"].*['\"]" k8s/ || (echo "Found potential passwords!" && exit 1)
+          echo "No secrets found in manifests."
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: 'k8s/'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  summary:
+    name: Validation Summary
+    runs-on: ubuntu-latest
+    needs: [validate-manifests, security-scan]
+    if: always()
+
+    steps:
+      - name: Check validation results
+        run: |
+          echo "## Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Manifest validation: ${{ needs.validate-manifests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Security scan: ${{ needs.security-scan.result }}" >> $GITHUB_STEP_SUMMARY

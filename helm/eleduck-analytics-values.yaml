@@ -1,0 +1,137 @@
+global:
+  namespace: eleduck-analytics
+
+  # MotherDuck configuration
+  motherduck:
+    secretName: motherduck-credentials
+    secretKey: token
+
+  # Supabase database configuration
+  database:
+    host: aws-0-us-west-1.pooler.supabase.com
+    port: 6543
+    sslMode: require  # Pooler requires SSL
+    secretName: supabase-credentials
+    secretUserKey: username
+    secretPasswordKey: password
+
+  # Use Zot internal registry
+  imageRegistry: 100.81.89.62:5000/eleduck
+  imagePullSecrets: []  # No auth needed for internal Zot
+
+  # Ingress with Contour
+  ingress:
+    enabled: true
+    className: contour
+    domain: soypetetech.local
+
+  # Enable monitoring
+  monitoring:
+    enabled: true
+
+# Airbyte configuration
+airbyte:
+  enabled: true
+  serviceAccount:
+    create: true
+    name: airbyte
+  global:
+    serviceAccountName: airbyte
+    deploymentMode: "oss"
+    edition: "community"
+    database:
+      type: external
+      host: aws-0-us-west-1.pooler.supabase.com
+      port: 6543
+      database: airbyte_internal
+      secretName: supabase-credentials
+      secretUserKey: username
+      secretPasswordKey: password
+    storage:
+      type: local
+      storageClassName: longhorn
+      volumeSize: 100Gi
+  postgresql:
+    enabled: false
+  minio:
+    enabled: false
+  webapp:
+    replicaCount: 1
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "250m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+  server:
+    replicaCount: 1
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1"
+  worker:
+    replicaCount: 1
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1"
+
+# Metabase configuration
+metabase:
+  enabled: true
+  image:
+    repository: metabase/metabase
+    tag: v0.48.0
+  siteUrl: "https://metabase.soypetetech.local"
+  database:
+    type: postgres
+    host: aws-0-us-west-1.pooler.supabase.com
+    port: 6543
+    dbname: metabase_app
+    existingSecret: supabase-credentials
+    existingSecretUsernameKey: username
+    existingSecretPasswordKey: password
+  persistence:
+    enabled: true
+    storageClass: longhorn
+    size: 10Gi
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1"
+
+# SQLMesh configuration
+sqlmesh:
+  enabled: true
+  image:
+    repository: 100.81.89.62:5000/eleduck/sqlmesh
+    tag: latest
+  database:
+    name: analytics
+    secretName: supabase-credentials
+  motherduck:
+    database: eleduck_analytics
+  schedule: "0 6 * * *"  # Daily at 6am UTC
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+# Podcast Scraper configuration
+podcast-scraper:
+  enabled: false  # Enable later when ready
+  database:
+    name: analytics

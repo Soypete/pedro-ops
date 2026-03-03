@@ -7,6 +7,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/soypete/pedro-ops/internal/types"
 )
 
@@ -47,7 +48,11 @@ func NewClient() *Client {
 }
 
 func (c *Client) initPrometheusMetrics() {
-	// API Latency histogram
+	c.initPrometheusHistograms()
+	c.initPrometheusCountersAndSizes()
+}
+
+func (c *Client) initPrometheusHistograms() {
 	c.apiLatency = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "openai_api_latency_milliseconds",
@@ -57,7 +62,6 @@ func (c *Client) initPrometheusMetrics() {
 		[]string{"model", "endpoint"},
 	)
 
-	// Time to First Token histogram
 	c.timeToFirstToken = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "openai_time_to_first_token_milliseconds",
@@ -67,7 +71,6 @@ func (c *Client) initPrometheusMetrics() {
 		[]string{"model", "endpoint"},
 	)
 
-	// Prompt processing time histogram
 	c.promptProcessing = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "openai_prompt_processing_milliseconds",
@@ -77,7 +80,6 @@ func (c *Client) initPrometheusMetrics() {
 		[]string{"model", "endpoint"},
 	)
 
-	// Token generation time histogram
 	c.tokenGeneration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "openai_token_generation_milliseconds",
@@ -87,7 +89,6 @@ func (c *Client) initPrometheusMetrics() {
 		[]string{"model", "endpoint"},
 	)
 
-	// Tokens per second gauge
 	c.tokensPerSecond = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "openai_tokens_per_second",
@@ -95,8 +96,9 @@ func (c *Client) initPrometheusMetrics() {
 		},
 		[]string{"model", "endpoint"},
 	)
+}
 
-	// Request counter
+func (c *Client) initPrometheusCountersAndSizes() {
 	c.requestCounter = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "openai_requests_total",
@@ -105,7 +107,6 @@ func (c *Client) initPrometheusMetrics() {
 		[]string{"model", "endpoint", "status"},
 	)
 
-	// Token counter
 	c.tokenCounter = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "openai_tokens_total",
@@ -114,7 +115,6 @@ func (c *Client) initPrometheusMetrics() {
 		[]string{"model", "endpoint", "type"},
 	)
 
-	// Request size histogram
 	c.requestSize = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "openai_request_size_bytes",
@@ -124,7 +124,6 @@ func (c *Client) initPrometheusMetrics() {
 		[]string{"model", "endpoint"},
 	)
 
-	// Response size histogram
 	c.responseSize = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "openai_response_size_bytes",
