@@ -60,10 +60,10 @@ done
 # Validate preset name
 if [[ -n "$PRESET" ]]; then
   case "$PRESET" in
-    text|code|vision|all) ;;
+    text|code|vision|tts|all) ;;
     *)
       echo "ERROR: Unknown preset '$PRESET'"
-      echo "Valid presets: text, code, vision, all"
+      echo "Valid presets: text, code, vision, tts, all"
       exit 1
       ;;
   esac
@@ -75,6 +75,7 @@ preset_file() {
     text)   echo "text.ini" ;;
     code)   echo "code.ini" ;;
     vision) echo "vision.ini" ;;
+    tts)    echo "tts.ini" ;;
     all)    echo "all-models.ini" ;;
   esac
 }
@@ -120,6 +121,18 @@ else
 
     echo "--- Activating preset: $PRESET ($INI_FILE) ---"
 
+    # Build extra flags for specific presets
+    EXTRA_FLAGS=""
+    if [[ "$PRESET" == "code" || "$PRESET" == "all" ]]; then
+      # MoE expert offload: keep attention on GPU, experts in 64GB RAM
+      EXTRA_FLAGS='    -ot ".ffn_.*_exps.=CPU" \\\n    --flash-attn \\'
+    fi
+
+    PRESET_PORT="\${PORT}"
+    if [[ "$PRESET" == "tts" ]]; then
+      PRESET_PORT="8001"
+    fi
+
     # Update the systemd override to use --models-preset
     ssh "$REMOTE_HOST" "sudo mkdir -p /etc/systemd/system/${SERVICE_NAME}.service.d"
     ssh "$REMOTE_HOST" "sudo tee /etc/systemd/system/${SERVICE_NAME}.service.d/preset.conf > /dev/null" <<EOF
@@ -127,14 +140,13 @@ else
 ExecStart=
 ExecStart=/opt/llama.cpp/build/bin/llama-server \\
     --host 0.0.0.0 \\
-    --port \${PORT} \\
+    --port $PRESET_PORT \\
     --models-preset $REMOTE_INI \\
     --models-max 1 \\
-    --n-gpu-layers \${N_GPU_LAYERS} \\
     --parallel \${N_PARALLEL} \\
     --jinja \\
     --no-webui \\
-    --metrics
+    --metrics$(if [[ -n "$EXTRA_FLAGS" ]]; then printf " \\\\\n$EXTRA_FLAGS"; fi)
 EOF
 
     ssh "$REMOTE_HOST" "sudo systemctl daemon-reload && sudo systemctl restart $SERVICE_NAME"
@@ -154,7 +166,7 @@ EOF
     fi
   else
     echo "Presets deployed. Use --preset <name> to activate one."
-    echo "Available: text, code, vision, all"
+    echo "Available: text, code, vision, tts, all"
   fi
 fi
 
