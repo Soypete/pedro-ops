@@ -8,9 +8,11 @@
 # pedrogpt hardware: 32GB VRAM + 64GB RAM
 #
 # pedro models (verified):
-#   unsloth/gpt-oss-20b-GGUF                       gpt-oss-20b-Q4_K_M.gguf          11.6 GB
-#   unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF      Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf  18.6 GB MoE
-#   unsloth/Qwen3.5-35B-A3B-GGUF                   Qwen3.5-35B-A3B-Q4_K_M.gguf      21.2 GB MoE
+#   unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF  UD-Q4_K_XL (multi-file)           MoE 12B active
+#   unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF        UD-Q4_K_XL (multi-file)           MoE 3B active
+#   unsloth/gpt-oss-20b-GGUF                        gpt-oss-20b-Q4_K_M.gguf          11.6 GB
+#   unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF       Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf  18.6 GB MoE
+#   unsloth/Qwen3.5-35B-A3B-GGUF                    Qwen3.5-35B-A3B-Q4_K_M.gguf      21.2 GB MoE
 #
 # Usage:
 #   ./switch-model.sh <hf-repo> <hf-file>
@@ -31,6 +33,13 @@ SUBCOMMAND="${1:-}"
 # ---------------------------------------------------------------------------
 if [[ "$SUBCOMMAND" == "list" ]]; then
   echo "pedro models:"
+  echo ""
+  echo "  unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF"
+  echo "    UD-Q4_K_XL (multi-file)           MoE 120B total, 12B active"
+  echo "    UD-Q2_K_XL (multi-file)           MoE smaller footprint"
+  echo ""
+  echo "  unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF"
+  echo "    UD-Q4_K_XL (multi-file)           MoE 80B total, 3B active"
   echo ""
   echo "  unsloth/gpt-oss-20b-GGUF"
   echo "    gpt-oss-20b-Q4_K_M.gguf          11.6 GB"
