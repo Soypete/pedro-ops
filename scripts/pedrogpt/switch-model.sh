@@ -8,9 +8,11 @@
 # pedrogpt hardware: 32GB VRAM + 64GB RAM
 #
 # pedro models (verified):
-#   unsloth/gpt-oss-20b-GGUF                       gpt-oss-20b-Q4_K_M.gguf          11.6 GB
-#   unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF      Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf  18.6 GB MoE
-#   unsloth/Qwen3.5-35B-A3B-GGUF                   Qwen3.5-35B-A3B-Q4_K_M.gguf      21.2 GB MoE
+#   unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF  UD-Q4_K_XL (multi-file)           MoE 12B active
+#   unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF        UD-Q4_K_XL (multi-file)           MoE 3B active
+#   unsloth/gpt-oss-20b-GGUF                        gpt-oss-20b-Q4_K_M.gguf          11.6 GB
+#   unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF       Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf  18.6 GB MoE
+#   unsloth/Qwen3.5-35B-A3B-GGUF                    Qwen3.5-35B-A3B-Q4_K_M.gguf      21.2 GB MoE
 #
 # Usage:
 #   ./switch-model.sh <hf-repo> <hf-file>
@@ -31,6 +33,13 @@ SUBCOMMAND="${1:-}"
 # ---------------------------------------------------------------------------
 if [[ "$SUBCOMMAND" == "list" ]]; then
   echo "pedro models:"
+  echo ""
+  echo "  unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF"
+  echo "    UD-Q4_K_XL (multi-file)           MoE 120B total, 12B active"
+  echo "    UD-Q2_K_XL (multi-file)           MoE smaller footprint"
+  echo ""
+  echo "  unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF"
+  echo "    UD-Q4_K_XL (multi-file)           MoE 80B total, 3B active"
   echo ""
   echo "  unsloth/gpt-oss-20b-GGUF"
   echo "    gpt-oss-20b-Q4_K_M.gguf          11.6 GB"
@@ -71,6 +80,21 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# MoE detection — these models need expert layers offloaded to RAM via
+# --override-tensor to avoid OOM on 32GB VRAM.
+# ---------------------------------------------------------------------------
+is_moe_model() {
+  local repo="$1" file="$2"
+  case "$repo" in
+    *Qwen3-Next*|*Qwen3-Coder*|*Qwen3.5*|*Nemotron*Super*|*A3B*|*A12B*) return 0 ;;
+  esac
+  case "$file" in
+    *A3B*|*A12B*|*MoE*|*moe*) return 0 ;;
+  esac
+  return 1
+}
+
 echo "=== Switching model ==="
 echo "Repo: $HF_REPO"
 echo "File: $HF_FILE"
@@ -78,6 +102,21 @@ echo ""
 
 sudo sed -i "s|^HF_REPO=.*|HF_REPO=$HF_REPO|" "$ENV_FILE"
 sudo sed -i "s|^HF_FILE=.*|HF_FILE=$HF_FILE|" "$ENV_FILE"
+
+if is_moe_model "$HF_REPO" "$HF_FILE"; then
+  OVERRIDE_TENSOR=".ffn_.*_exps.=CPU"
+  echo "MoE model detected — setting OVERRIDE_TENSOR=$OVERRIDE_TENSOR"
+  echo "(expert layers will be offloaded to 64GB RAM, attention stays on GPU)"
+else
+  OVERRIDE_TENSOR=""
+  echo "Dense model — OVERRIDE_TENSOR cleared"
+fi
+
+if grep -q "^OVERRIDE_TENSOR" "$ENV_FILE"; then
+  sudo sed -i "s|^OVERRIDE_TENSOR=.*|OVERRIDE_TENSOR=$OVERRIDE_TENSOR|" "$ENV_FILE"
+else
+  echo "OVERRIDE_TENSOR=$OVERRIDE_TENSOR" | sudo tee -a "$ENV_FILE" > /dev/null
+fi
 
 echo "Updated $ENV_FILE"
 echo "Restarting llama-server (will download model if not cached)..."

@@ -187,11 +187,63 @@ PORT=8080
 
 # HuggingFace token (required for model downloads — keep this file root-only)
 HF_TOKEN=your_token_here
+
+# MoE expert layer offload pattern (set by switch-model.sh for MoE models).
+# Keeps expert weight tensors in 64GB RAM instead of VRAM — required for
+# models like Qwen3-Next-80B and Nemotron-120B to avoid OOM on 32GB VRAM.
+# Leave empty for dense models (gpt-oss-20b, etc).
+OVERRIDE_TENSOR=
 EOF
   echo "Edit $ENV_FILE before starting the service."
 else
   echo "--- $ENV_FILE already exists, skipping ---"
+  # Add OVERRIDE_TENSOR to existing env file if missing
+  if ! grep -q "^OVERRIDE_TENSOR" "$ENV_FILE"; then
+    echo "" | sudo tee -a "$ENV_FILE" > /dev/null
+    echo "# MoE expert layer offload — set by switch-model.sh for MoE models, leave empty for dense" | sudo tee -a "$ENV_FILE" > /dev/null
+    echo "OVERRIDE_TENSOR=" | sudo tee -a "$ENV_FILE" > /dev/null
+    echo "Added OVERRIDE_TENSOR to existing $ENV_FILE"
+  fi
 fi
+
+# ---------------------------------------------------------------------------
+# Wrapper script — handles optional --override-tensor for MoE models.
+# Systemd ExecStart can't do conditional args, so we use a launcher script.
+# ---------------------------------------------------------------------------
+WRAPPER="$LLAMA_DIR/run-server.sh"
+echo "--- Installing launcher wrapper $WRAPPER ---"
+sudo tee "$WRAPPER" > /dev/null <<'WRAPPER_EOF'
+#!/bin/bash
+# llama-server launcher — reads /etc/llama-server.env and starts the server.
+# Called by the llama-server systemd service.
+set -euo pipefail
+
+ENV_FILE="/etc/llama-server.env"
+# shellcheck source=/etc/llama-server.env
+source "$ENV_FILE"
+
+export HF_HOME="${HF_HOME:-/opt/models/cache}"
+export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}"
+
+OVERRIDE_ARGS=()
+if [[ -n "${OVERRIDE_TENSOR:-}" ]]; then
+  OVERRIDE_ARGS=(--override-tensor "${OVERRIDE_TENSOR}")
+fi
+
+exec /opt/llama.cpp/build/bin/llama-server \
+    --host 0.0.0.0 \
+    --port "${PORT:-8080}" \
+    --hf-repo "${HF_REPO}" \
+    --hf-file "${HF_FILE}" \
+    --ctx-size "${N_CTX:-8192}" \
+    --n-gpu-layers "${N_GPU_LAYERS:--1}" \
+    --parallel "${N_PARALLEL:-4}" \
+    --jinja \
+    --no-webui \
+    --metrics \
+    "${OVERRIDE_ARGS[@]}"
+WRAPPER_EOF
+sudo chmod +x "$WRAPPER"
 
 # ---------------------------------------------------------------------------
 # Systemd service
@@ -206,19 +258,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=$ENV_FILE
-ExecStart=$LLAMA_DIR/build/bin/llama-server \\
-    --host 0.0.0.0 \\
-    --port \${PORT} \\
-    --hf-repo \${HF_REPO} \\
-    --hf-file \${HF_FILE} \\
-    --ctx-size \${N_CTX} \\
-    --n-gpu-layers \${N_GPU_LAYERS} \\
-    --parallel \${N_PARALLEL} \\
-    --jinja \\
-    --no-webui \\
-    --metrics
-Environment=HF_HOME=\${HF_HOME}
+ExecStart=$LLAMA_DIR/run-server.sh
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
