@@ -41,8 +41,9 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model": "qwen3-coder-30b", "messages": [{"role": "user", "content": "write a go function"}]}'
 ```
 
-With `--models-max 1`, only one model stays in VRAM. The server swaps
-automatically (~30s load time) when you request a different model name.
+With `--models-max 1`, only one model occupies VRAM at a time. When you
+request a different model, the server evicts the current model from VRAM
+and loads the new one (~30s swap time).
 
 ### MoE expert offload (Qwen3-Next 80B)
 
