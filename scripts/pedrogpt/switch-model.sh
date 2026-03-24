@@ -80,6 +80,21 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# MoE detection — these models need expert layers offloaded to RAM via
+# --override-tensor to avoid OOM on 32GB VRAM.
+# ---------------------------------------------------------------------------
+is_moe_model() {
+  local repo="$1" file="$2"
+  case "$repo" in
+    *Qwen3-Next*|*Qwen3-Coder*|*Qwen3.5*|*Nemotron*Super*|*A3B*|*A12B*) return 0 ;;
+  esac
+  case "$file" in
+    *A3B*|*A12B*|*MoE*|*moe*) return 0 ;;
+  esac
+  return 1
+}
+
 echo "=== Switching model ==="
 echo "Repo: $HF_REPO"
 echo "File: $HF_FILE"
@@ -87,6 +102,21 @@ echo ""
 
 sudo sed -i "s|^HF_REPO=.*|HF_REPO=$HF_REPO|" "$ENV_FILE"
 sudo sed -i "s|^HF_FILE=.*|HF_FILE=$HF_FILE|" "$ENV_FILE"
+
+if is_moe_model "$HF_REPO" "$HF_FILE"; then
+  OVERRIDE_TENSOR=".ffn_.*_exps.=CPU"
+  echo "MoE model detected — setting OVERRIDE_TENSOR=$OVERRIDE_TENSOR"
+  echo "(expert layers will be offloaded to 64GB RAM, attention stays on GPU)"
+else
+  OVERRIDE_TENSOR=""
+  echo "Dense model — OVERRIDE_TENSOR cleared"
+fi
+
+if grep -q "^OVERRIDE_TENSOR" "$ENV_FILE"; then
+  sudo sed -i "s|^OVERRIDE_TENSOR=.*|OVERRIDE_TENSOR=$OVERRIDE_TENSOR|" "$ENV_FILE"
+else
+  echo "OVERRIDE_TENSOR=$OVERRIDE_TENSOR" | sudo tee -a "$ENV_FILE" > /dev/null
+fi
 
 echo "Updated $ENV_FILE"
 echo "Restarting llama-server (will download model if not cached)..."

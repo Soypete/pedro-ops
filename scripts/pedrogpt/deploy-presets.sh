@@ -125,7 +125,7 @@ else
     EXTRA_FLAGS=""
     if [[ "$PRESET" == "code" || "$PRESET" == "all" ]]; then
       # MoE expert offload: keep attention on GPU, experts in 64GB RAM
-      EXTRA_FLAGS='    -ot ".ffn_.*_exps.=CPU" \\\n    --flash-attn \\'
+      EXTRA_FLAGS='    -ot ".ffn_.*_exps.=CPU" \\\n    --flash-attn on \\'
     fi
 
     PRESET_PORT="\${PORT}"

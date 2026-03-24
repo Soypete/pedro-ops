@@ -53,10 +53,12 @@ attention on GPU. Add `-ot` to the CLI (not in the INI):
 llama-server \
   --models-preset /opt/llama.cpp/presets/code.ini \
   -ot ".ffn_.*_exps.=CPU" \
-  --flash-attn \
+  --flash-attn on \
   --host 0.0.0.0 --port 8080 \
   --metrics
 ```
+
+> **Note:** `--flash-attn` requires an explicit value (`on`, `off`, or `auto`). Omitting it causes a startup error.
 
 ### TTS (separate process on port 8001)
 
