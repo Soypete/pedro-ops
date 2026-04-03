@@ -105,17 +105,25 @@ sudo sed -i "s|^HF_FILE=.*|HF_FILE=$HF_FILE|" "$ENV_FILE"
 
 if is_moe_model "$HF_REPO" "$HF_FILE"; then
   OVERRIDE_TENSOR=".ffn_.*_exps.=CPU"
-  echo "MoE model detected — setting OVERRIDE_TENSOR=$OVERRIDE_TENSOR"
-  echo "(expert layers will be offloaded to 64GB RAM, attention stays on GPU)"
+  FLASH_ATTN="1"
+  echo "MoE model detected — setting OVERRIDE_TENSOR=$OVERRIDE_TENSOR, FLASH_ATTN=1"
+  echo "(expert layers offloaded to 64GB RAM, flash-attn reduces KV cache VRAM)"
 else
   OVERRIDE_TENSOR=""
-  echo "Dense model — OVERRIDE_TENSOR cleared"
+  FLASH_ATTN=""
+  echo "Dense model — OVERRIDE_TENSOR and FLASH_ATTN cleared"
 fi
 
 if grep -q "^OVERRIDE_TENSOR" "$ENV_FILE"; then
   sudo sed -i "s|^OVERRIDE_TENSOR=.*|OVERRIDE_TENSOR=$OVERRIDE_TENSOR|" "$ENV_FILE"
 else
   echo "OVERRIDE_TENSOR=$OVERRIDE_TENSOR" | sudo tee -a "$ENV_FILE" > /dev/null
+fi
+
+if grep -q "^FLASH_ATTN" "$ENV_FILE"; then
+  sudo sed -i "s|^FLASH_ATTN=.*|FLASH_ATTN=$FLASH_ATTN|" "$ENV_FILE"
+else
+  echo "FLASH_ATTN=$FLASH_ATTN" | sudo tee -a "$ENV_FILE" > /dev/null
 fi
 
 echo "Updated $ENV_FILE"

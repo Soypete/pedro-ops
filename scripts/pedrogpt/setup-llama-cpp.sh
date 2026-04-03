@@ -193,6 +193,12 @@ HF_TOKEN=your_token_here
 # models like Qwen3-Next-80B and Nemotron-120B to avoid OOM on 32GB VRAM.
 # Leave empty for dense models (gpt-oss-20b, etc).
 OVERRIDE_TENSOR=
+
+# Flash attention (set by switch-model.sh for MoE models).
+# Reduces KV cache VRAM usage — required alongside OVERRIDE_TENSOR for large
+# MoE models (Nemotron-120B, Qwen3-Next-80B) to avoid OOM on 32GB VRAM.
+# Set to 1 for MoE models, leave empty for dense models.
+FLASH_ATTN=
 EOF
   echo "Edit $ENV_FILE before starting the service."
 else
@@ -203,6 +209,13 @@ else
     echo "# MoE expert layer offload — set by switch-model.sh for MoE models, leave empty for dense" | sudo tee -a "$ENV_FILE" > /dev/null
     echo "OVERRIDE_TENSOR=" | sudo tee -a "$ENV_FILE" > /dev/null
     echo "Added OVERRIDE_TENSOR to existing $ENV_FILE"
+  fi
+  # Add FLASH_ATTN to existing env file if missing
+  if ! grep -q "^FLASH_ATTN" "$ENV_FILE"; then
+    echo "" | sudo tee -a "$ENV_FILE" > /dev/null
+    echo "# Flash attention — set by switch-model.sh for MoE models, leave empty for dense" | sudo tee -a "$ENV_FILE" > /dev/null
+    echo "FLASH_ATTN=" | sudo tee -a "$ENV_FILE" > /dev/null
+    echo "Added FLASH_ATTN to existing $ENV_FILE"
   fi
 fi
 
@@ -225,9 +238,12 @@ source "$ENV_FILE"
 export HF_HOME="${HF_HOME:-/opt/models/cache}"
 export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}"
 
-OVERRIDE_ARGS=()
+EXTRA_ARGS=()
 if [[ -n "${OVERRIDE_TENSOR:-}" ]]; then
-  OVERRIDE_ARGS=(--override-tensor "${OVERRIDE_TENSOR}")
+  EXTRA_ARGS+=(--override-tensor "${OVERRIDE_TENSOR}")
+fi
+if [[ "${FLASH_ATTN:-}" == "1" ]]; then
+  EXTRA_ARGS+=(--flash-attn)
 fi
 
 exec /opt/llama.cpp/build/bin/llama-server \
@@ -241,7 +257,7 @@ exec /opt/llama.cpp/build/bin/llama-server \
     --jinja \
     --no-webui \
     --metrics \
-    "${OVERRIDE_ARGS[@]}"
+    "${EXTRA_ARGS[@]}"
 WRAPPER_EOF
 sudo chmod +x "$WRAPPER"
 
