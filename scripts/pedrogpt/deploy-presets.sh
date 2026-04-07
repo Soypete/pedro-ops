@@ -133,9 +133,11 @@ else
       PRESET_PORT="8001"
     fi
 
-    # Update the systemd override to use --models-preset
-    ssh -t "$REMOTE_HOST" "sudo mkdir -p /etc/systemd/system/${SERVICE_NAME}.service.d"
-    ssh "$REMOTE_HOST" "sudo tee /etc/systemd/system/${SERVICE_NAME}.service.d/preset.conf > /dev/null" <<EOF
+    # Write preset.conf to a local temp file, SCP it, then move into place with sudo
+    TMPCONF="$(mktemp)"
+    trap 'rm -f "$TMPCONF"' EXIT
+
+    cat > "$TMPCONF" <<CONF
 [Service]
 ExecStart=
 ExecStart=/opt/llama.cpp/build/bin/llama-server \\
@@ -143,11 +145,13 @@ ExecStart=/opt/llama.cpp/build/bin/llama-server \\
     --port $PRESET_PORT \\
     --models-preset $REMOTE_INI \\
     --models-max 1 \\
-    --parallel \${N_PARALLEL} \\
     --jinja \\
     --no-webui \\
     --metrics$(if [[ -n "$EXTRA_FLAGS" ]]; then printf " \\\\\n$EXTRA_FLAGS"; fi)
-EOF
+CONF
+
+    scp "$TMPCONF" "$REMOTE_HOST:/tmp/preset.conf"
+    ssh -t "$REMOTE_HOST" "sudo mkdir -p /etc/systemd/system/${SERVICE_NAME}.service.d && sudo mv /tmp/preset.conf /etc/systemd/system/${SERVICE_NAME}.service.d/preset.conf && sudo chmod 644 /etc/systemd/system/${SERVICE_NAME}.service.d/preset.conf"
 
     ssh -t "$REMOTE_HOST" "sudo systemctl daemon-reload && sudo systemctl restart $SERVICE_NAME"
     sleep 3

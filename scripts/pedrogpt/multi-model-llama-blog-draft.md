@@ -172,3 +172,69 @@ The API is OpenAI-compatible. The only change clients need is setting the `"mode
 Five models, one port, one process. The RTX 5090's 32GB VRAM comfortably holds any of the dense models outright, and with expert offloading to RAM, even a 120B MoE becomes practical. Model swap latency is ~30 seconds — acceptable for task-switching workloads where you're not hot-swapping mid-conversation.
 
 The llama.cpp `--models-preset` feature does the heavy lifting. The systemd drop-in keeps the operational config clean and rollback to single-model mode is one `rm` and a restart.
+
+---
+
+## Addendum: Context Windows, Quantization, and What We Learned the Hard Way
+
+After the initial deployment, we iterated on context window sizes and quantization choices. Here's what we found.
+
+### Bumping Context Windows
+
+The original preset used conservative `ctx-size` values (8192–16384). We bumped these to match each model's actual training context length:
+
+| Model | Old ctx-size | New ctx-size | Model max |
+|-------|-------------|-------------|-----------|
+| gpt-oss-20b | 16,384 | 32,768 | 32,768 |
+| nemotron-3-super-120b | 16,384 | 131,072 | 1,048,576 |
+| qwen3-next-80b | 65,536 | 131,072 | 131,072 |
+| qwen3-coder-30b | 32,768 | 131,072 | 131,072 |
+| qwen2.5-vl-32b | 8,192 | 32,768 | 32,768 |
+
+One gotcha: the preset INI files live in the repo but the *running* server uses the copy deployed to `/opt/llama.cpp/presets/`. Updating the repo without redeploying means the server keeps serving the old config. The `/v1/models` endpoint shows the active `ctx-size` per model — always check there, not the repo.
+
+### Per-Model Overrides vs CLI Flags
+
+Our initial setup passed `-ot ".ffn_.*_exps.=CPU" --flash-attn on` on the CLI, which applied globally to every model. This works but is a blunt instrument — dense models like gpt-oss-20b don't need expert offloading, and the global `--parallel` flag forced the same slot count on every model.
+
+The better approach is per-model configuration in the INI:
+
+```ini
+[nemotron-3-super-120b]
+override-tensor = .ffn_.*_exps.=CPU
+flash-attn = true
+no-mmap = true
+parallel = 1
+```
+
+This lets each model define its own offload strategy, parallelism, and memory settings. The CLI-level flags are reserved for things that truly apply to every model (like `--jinja` and `--metrics`).
+
+### The Quantization Trap: Q4_K_XL vs Q3_K_M for MoE
+
+We originally used the `UD-Q4_K_XL` quant for Nemotron-3-Super-120B (~77 GB across 3 GGUF files). With all experts offloaded to CPU, it loaded and ran at ~4.3 tokens/second generation speed — usable but slow.
+
+We tried to speed it up with selective expert offloading: keep layers 0–14 on GPU and offload only layers 15+ to CPU. The idea was to reduce the number of CPU↔GPU round-trips per token. It failed — llama.cpp tried to allocate a single ~79 GB CUDA buffer for the retained expert layers and OOM'd immediately. Even keeping just layers 0–4 on GPU triggered the same allocation. The expert tensors in this model are too large for partial offloading on 32 GB VRAM.
+
+We switched to `Q3_K_M` (~52 GB, single file). The tradeoffs:
+
+- **RAM headroom**: 52 GB in RAM vs 77 GB leaves more room for the OS, KV cache, and other processes
+- **Quality**: Slightly lower fidelity than Q4_K_XL, but for a 120B MoE with only 12B active params, the per-expert quality loss is less impactful than it would be for a dense model
+- **Speed**: Same generation speed (~4–5 tok/s) since the bottleneck is CPU expert inference over PCIe, not quantization level
+- **Single file**: No multi-part GGUF complexity
+
+### Performance Tuning for MoE on CPU+GPU
+
+For MoE models with expert offloading, we found these settings matter:
+
+- **`no-mmap = true`**: llama.cpp itself recommends this when using tensor overrides to CPU. With mmap, the OS page cache competes with the model for RAM. Without mmap, the model loads into a dedicated allocation.
+- **`parallel = 1`**: Each parallel slot reserves its own KV cache in VRAM. For a 131K context window, 4 slots × 131K tokens is a huge KV footprint. Dropping to 1 slot freed significant VRAM. For a model that's already slow at ~4 tok/s, concurrent request handling isn't the bottleneck.
+- **`flash-attn = true`**: Reduces KV cache memory pressure, critical at 131K context lengths.
+
+### The Deploy Script Problem
+
+Our `deploy-presets.sh` script uses SSH to copy files and restart the service remotely. In practice, `ssh -t` with `sudo` prompts is fragile from non-interactive scripts — heredocs conflict with terminal allocation, and password prompts fail silently. The workaround:
+
+1. SCP the preset files to `/tmp/` on the remote (no sudo needed)
+2. SSH in interactively to move files and restart the service
+
+Long-term fix: passwordless sudo for the specific `systemctl` and `cp` commands the deploy script needs, via a sudoers rule on pedrogpt.
