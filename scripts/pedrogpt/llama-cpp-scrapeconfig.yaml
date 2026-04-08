@@ -1,10 +1,11 @@
-# ScrapeConfig for llama.cpp running on pedrogpt (external to k8s cluster).
+# ScrapeConfigs for llama.cpp running on pedrogpt (external to k8s cluster).
 #
-# llama-server must be started with the --metrics flag, which enables the
-# Prometheus endpoint at /metrics on the server port (default 8080).
+# In router mode (--models-preset), the /metrics endpoint requires a ?model=
+# query parameter. Each model gets its own ScrapeConfig so Prometheus can
+# track per-model throughput independently.
 #
 # Apply to the monitoring namespace:
-#   kubectl apply -f charts/monitoring/llama-cpp-scrapeconfig.yaml
+#   kubectl apply -f llama-cpp-scrapeconfig.yaml
 #
 # The kube-prometheus-stack is configured with:
 #   serviceMonitorSelectorNilUsesHelmValues: false
@@ -19,7 +20,7 @@
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: ScrapeConfig
 metadata:
-  name: llama-cpp-pedrogpt
+  name: llama-cpp-gpt-oss-20b
   namespace: monitoring
   labels:
     app.kubernetes.io/name: llama-cpp
@@ -32,6 +33,101 @@ spec:
       labels:
         job: llama-cpp
         instance: pedrogpt
+        model: gpt-oss-20b
   metricsPath: /metrics
+  params:
+    model: ["gpt-oss-20b"]
+  scrapeInterval: 30s
+  scrapeTimeout: 15s
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: llama-cpp-nemotron-3-super-120b
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: llama-cpp
+    app.kubernetes.io/instance: pedrogpt
+    app.kubernetes.io/component: llm-server
+spec:
+  staticConfigs:
+    - targets:
+        - "100.121.229.114:8080"
+      labels:
+        job: llama-cpp
+        instance: pedrogpt
+        model: nemotron-3-super-120b
+  metricsPath: /metrics
+  params:
+    model: ["nemotron-3-super-120b"]
+  scrapeInterval: 30s
+  scrapeTimeout: 15s
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: llama-cpp-qwen3-coder-30b
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: llama-cpp
+    app.kubernetes.io/instance: pedrogpt
+    app.kubernetes.io/component: llm-server
+spec:
+  staticConfigs:
+    - targets:
+        - "100.121.229.114:8080"
+      labels:
+        job: llama-cpp
+        instance: pedrogpt
+        model: qwen3-coder-30b
+  metricsPath: /metrics
+  params:
+    model: ["qwen3-coder-30b"]
+  scrapeInterval: 30s
+  scrapeTimeout: 15s
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: llama-cpp-qwen3-next-80b
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: llama-cpp
+    app.kubernetes.io/instance: pedrogpt
+    app.kubernetes.io/component: llm-server
+spec:
+  staticConfigs:
+    - targets:
+        - "100.121.229.114:8080"
+      labels:
+        job: llama-cpp
+        instance: pedrogpt
+        model: qwen3-next-80b
+  metricsPath: /metrics
+  params:
+    model: ["qwen3-next-80b"]
+  scrapeInterval: 30s
+  scrapeTimeout: 15s
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: llama-cpp-qwen2-5-vl-32b
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: llama-cpp
+    app.kubernetes.io/instance: pedrogpt
+    app.kubernetes.io/component: llm-server
+spec:
+  staticConfigs:
+    - targets:
+        - "100.121.229.114:8080"
+      labels:
+        job: llama-cpp
+        instance: pedrogpt
+        model: qwen2.5-vl-32b
+  metricsPath: /metrics
+  params:
+    model: ["qwen2.5-vl-32b"]
   scrapeInterval: 30s
   scrapeTimeout: 15s
