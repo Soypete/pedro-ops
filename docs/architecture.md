@@ -26,12 +26,14 @@ Pedro Ops is a production-ready 3-node Kubernetes cluster built with Foundry CLI
 
 ### Node Specifications
 
-| Node | IP | Role | Resources | Special |
-|------|----|------|-----------|---------|
-| control-plane | 100.81.89.62 | Control plane + infra | 4+ cores, 8GB+ RAM | Runs OpenBAO, PowerDNS, Zot |
-| worker-1 | 100.70.90.12 | Worker | 4+ cores, 8GB+ RAM | **2TB storage backend** |
-| worker-2 | 100.125.196.1 | Worker | 4+ cores, 8GB+ RAM | - |
-| **VIP** | **100.81.89.100** | K8s API | N/A | Virtual IP for HA |
+| Hostname | Tailscale IP | Role | Resources | Special |
+|----------|--------------|------|-----------|---------|
+| blue1 | 100.81.89.62 | Control plane + infra | 4+ cores, 8GB+ RAM | Runs OpenBAO, PowerDNS, Zot |
+| refurb | 100.70.90.12 | Worker | 4+ cores, 8GB+ RAM | **2TB storage backend** (1.5TB usable) |
+| blue2 | 100.125.196.1 | Worker | 4+ cores, 8GB+ RAM | - |
+| **VIP** | **10.0.0.11** | K8s API | N/A | Virtual IP for HA (CGNAT range) |
+
+> **Note:** The cluster uses Tailscale for remote access. The Kubeconfig and node joins use the control plane's Tailscale IP (100.81.89.62), not the VIP (10.0.0.11), since the VIP is not accessible over Tailscale network.
 
 ## Software Stack
 
