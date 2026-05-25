@@ -93,8 +93,26 @@ kubectl --kubeconfig ~/.foundry/kubeconfig get connector -n tailscale
 
 See full guide at: https://github.com/catalystcommunity/foundry/issues/17
 
+## MagicDNS (Included)
+
+When the Tailscale Operator is installed, MagicDNS is automatically configured. The operator creates:
+
+- A `nameserver` service in the `tailscale` namespace (IP: 10.43.227.123)
+- A `DNSConfig` resource (`ts-dns`) that manages DNS records
+- Automatic DNS records for Tailscale-served ingresses
+
+**No additional setup needed** - MagicDNS works automatically for all Tailscale-connected devices.
+
+### DNS Resolution
+
+Services exposed via Tailscale Funnel/Serve are available at:
+- `*.tail6fbc5.ts.net` (Tailscale-managed domain)
+
+For custom domains (like `grafana.soypetetech.local`), you need:
+1. Contour ingress (already configured)
+2. Point your domain DNS to the cluster's ingress IP
+
 ## Next Steps
 
 1. Join worker nodes to cluster
-2. Configure Tailscale Magic DNS
-3. Test VIP connectivity from Tailscale devices
+2. Test VIP connectivity from Tailscale devices

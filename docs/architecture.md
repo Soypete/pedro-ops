@@ -294,6 +294,7 @@ graph TB
 - Sync: `scripts/sync-secrets-to-openbao.sh` syncs to OpenBAO
 - K8s Secrets: `scripts/create-secrets-from-openbao.sh` creates secrets before Helm deployment
 - Keys: DATABASE_USER, DATABASE_PASSWORD, motherduck token, podcast API credentials
+- **Current Issue**: pedro-bots deployments have secrets embedded in helm values (insecure). Should migrate to use OpenBAO with vault-agent-injector or external-secrets-operator
 
 **Known Issues:**
 - **Supabase Pooler**: Uses PgBouncer in transaction mode, which doesn't support prepared statements
