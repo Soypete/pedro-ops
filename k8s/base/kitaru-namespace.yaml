@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kitaru
+  labels:
+    name: kitaru
+    app.kubernetes.io/name: kitaru

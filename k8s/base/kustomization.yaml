@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
+  - kitaru-namespace.yaml
 
 commonLabels:
   app.kubernetes.io/managed-by: kustomize

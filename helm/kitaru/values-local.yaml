@@ -1,0 +1,33 @@
+kitaru:
+  server:
+    serverURL: http://kitaru.kitaru.svc.cluster.local
+
+    auth:
+      jwtSecretKey: "4e266efa757268ca94b9f91a0b899cf1d6832cb5c141e5404d5addaaeedbcbfa"
+
+    secretsStore:
+      enabled: true
+      type: sql
+      sql:
+        encryptionKey: "4e266efa757268ca94b9f91a0b899cf1d6832cb5c141e5404d5addaaeedbcbfa"
+
+    ingress:
+      enabled: false
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+persistence:
+  enabled: true
+  size: 50Gi
+  storageClass: longhorn
+  accessMode: ReadWriteOnce
+
+service:
+  type: ClusterIP
+  port: 80
