@@ -168,6 +168,88 @@ To view config:
 ssh root@100.81.89.62 'cat /etc/foundry-zot/config.json' | jq
 ```
 
+## K3s Node Configuration
+
+To pull images from the local Zot registry (`100.81.89.62:5000`), K3s nodes need the registry configured as insecure.
+
+### Apply to All Nodes
+
+Copy the registries config to each node and restart K3s:
+
+```bash
+# On each node (blue1, blue2, refurb):
+scp scripts/k8s/registries.yaml <node>:/tmp/registries.yaml
+ssh <node> "sudo cp /tmp/registries.yaml /etc/rancher/k3s/registries.yaml"
+
+# Restart K3s
+ssh blue1 "sudo systemctl restart k3s"  # control plane
+ssh blue2 "sudo systemctl restart k3s-agent"  # workers
+ssh refurb "sudo systemctl restart k3s-agent"  # workers
+```
+
+Or via SSH with stdin:
+
+```bash
+ssh -o StrictHostKeyChecking=no blue1 "sudo tee /etc/rancher/k3s/registries.yaml" < scripts/k8s/registries.yaml
+ssh blue1 "sudo systemctl restart k3s"
+```
+
+### Node Hostnames
+- **blue1**: 100.81.89.62 / 192.168.1.128 (control plane)
+- **blue2**: 100.70.90.12 / 192.168.1.11 (worker)
+- **refurb**: 100.125.196.1 / 192.168.1.253 (worker)
+
+## Troubleshooting
+
+### ImagePullBackOff: "http: server gave HTTP response to HTTPS client"
+
+The K3s nodes need the insecure registry configured. See [K3s Node Configuration](#k3s-node-configuration) above.
+
+After applying `registries.yaml` to each node, restart K3s:
+```bash
+# Control plane
+ssh root@100.81.89.62 "systemctl restart k3s"
+# Workers
+ssh root@100.70.90.12 "systemctl restart k3s-agent"
+ssh root@100.125.196.1 "systemctl restart k3s-agent"
+```
+
+### Image Tag Not Found
+
+If pods fail with "not found", check the correct image tag:
+```bash
+curl -s http://100.81.89.62:5000/v2/<repo-name>/tags/list | jq
+```
+
+Update deployment to use correct tag:
+```bash
+kubectl set image deployment/<name> <container>=100.81.89.62:5000/<repo>:latest -n <namespace>
+```
+
+### Container Command Errors
+
+If container fails with "invalid choice" errors, the image may use different entrypoints. Check what's available:
+```bash
+podman run --rm 100.81.89.62:5000/<image> --help
+podman run --rm 100.81.89.62:5000/<image> agent --help
+```
+
+Fix deployment command:
+```bash
+kubectl patch deployment/<name> -n <namespace> -p '{"spec":{"template":{"spec":{"containers":[{"name":"<container>","command":["python","-m","main","agent","--agent","social-poster"]}]}}}}'
+```
+
+### Missing Environment Variables
+
+Pods may crash if required env vars are missing. Add them:
+```bash
+kubectl patch deployment/<name> -n <namespace> -p '{"spec":{"template":{"spec":{"containers":[{"name":"<container>","env":[{"name":"LLAMA_CPP_BASE_URL","value":"http://100.121.229.114:8080"}]}]}}}}'
+```
+
+### Database Connection Errors
+
+If pods fail with "Tenant or user not found", the database credentials have changed. Update the secrets in the deployment.
+
 ## Security Note
 
 Currently, Zot is running **without authentication** for internal cluster use. Images are accessible from:

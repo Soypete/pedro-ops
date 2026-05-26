@@ -68,6 +68,10 @@ components:
         tags:
             - tag:k8s-pedro-ops
             - tag:production
+        # MagicDNS is automatically enabled when tailscale operator is installed
+        # - DNSConfig CRD deployed automatically
+        # - CoreDNS patched for .ts.net forwarding
+        # - nameserver pod runs in tailscale namespace
     zot:
         hosts:
             - control-plane

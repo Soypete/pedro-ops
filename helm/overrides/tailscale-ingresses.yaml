@@ -1,0 +1,83 @@
+# Tailscale Ingresses - Expose services via Tailscale instead of Contour
+# Apply with: kubectl apply -f tailscale-ingresses.yaml
+
+---
+# Grafana
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+  namespace: monitoring
+  annotations:
+    tailscale.com/hostname: grafana
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: grafana
+      port:
+        number: 80
+---
+# Loki
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: loki
+  namespace: monitoring
+  annotations:
+    tailscale.com/hostname: loki
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: loki-gateway
+      port:
+        number: 80
+---
+# Longhorn UI
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: longhorn
+  namespace: longhorn-system
+  annotations:
+    tailscale.com/hostname: longhorn
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: longhorn-frontend
+      port:
+        number: 80
+---
+# SeaweedFS Filer
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: seaweedfs-filer
+  namespace: seaweedfs
+  annotations:
+    tailscale.com/hostname: seaweedfs
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: seaweedfs-filer
+      port:
+        number: 8888
+---
+# SeaweedFS S3
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: seaweedfs-s3
+  namespace: seaweedfs
+  annotations:
+    tailscale.com/hostname: s3
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: seaweedfs-s3
+      port:
+        number: 8333

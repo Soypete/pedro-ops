@@ -130,6 +130,46 @@ kubectl describe node <node-name>
    ssh root@<node-ip> 'df -h'
    ```
 
+### Cluster Not Accessible Remotely (Tailscale)
+
+**Symptoms:**
+- `kubectl` commands timeout with `dial tcp 10.0.0.11:6443: i/o timeout`
+- Gateway API install fails with connection errors
+- Cluster works locally but not via Tailscale VPN
+
+**Root Cause:**
+The kubeconfig and node join commands use the VIP (10.0.0.11) which is not accessible over the Tailscale network. The cluster must use the control plane's Tailscale IP for remote access.
+
+**Diagnosis:**
+
+```bash
+# Check current kubeconfig server
+grep "server:" ~/.foundry/kubeconfig
+
+# Should show: server: https://100.81.89.62:6443 (Tailscale IP)
+# Not: server: https://10.0.0.11:6443 (VIP - inaccessible remotely)
+```
+
+**Solution (Foundry fix):**
+
+The fix is in branch `feat/use-tailscale-ip-in-kubeconfig`:
+1. Modified `ModifyKubeconfigServer` to accept serverAddress parameter
+2. Changed cluster init to use `firstHost.Address` instead of `cfg.Cluster.VIP`
+3. Added `getControlPlaneAddress()` helper in node_add.go
+
+**Workaround (manual fix):**
+
+```bash
+# Fix existing kubeconfig
+sed -i 's/10.0.0.11/100.81.89.62/g' ~/.foundry/kubeconfig
+
+# Or regenerate by running cluster init with fixed binary
+/tmp/foundry cluster init
+```
+
+**Prevention:**
+Ensure the Foundry fix is merged and deployed before cluster setup when using Tailscale for remote access.
+
 ## Networking Problems
 
 ### Cannot Access Services via Port-Forward
@@ -394,6 +434,67 @@ kubectl logs -n longhorn-system -l app=longhorn-manager
    ```bash
    kubectl rollout restart deployment/longhorn-driver-deployer -n longhorn-system
    ```
+
+### Longhorn Using Wrong Disk (Local vs Mounted)
+
+**Symptoms:**
+- Longhorn shows only ~100GB available on nodes instead of 1.5TB
+- PVCs stuck in `ContainerCreating` with volume attachment failures
+- Volumes show `detached` + `faulted` state
+- Error: `insufficient storage;precheck new replica failed`
+
+**Diagnosis:**
+
+```bash
+# Check Longhorn node disk status
+kubectl get nodes.longhorn.io -n longhorn-system -o json | jq '.items[] | {node: .metadata.name, disks: .status.diskStatus}'
+
+# Check available storage per node
+kubectl get nodes.longhorn.io -n longhorn-system -o json | jq '.items[] | .status.diskStatus | to_entries[] | {disk: .key, available: .value.storageAvailable, maximum: .value.storageMaximum}'
+```
+
+**Root Cause:**
+By default, Longhorn uses `/var/lib/longhorn` which is on the OS disk (typically 512GB NVMe). The 2TB mounted drive at `/data/persistent-storage` is not automatically used.
+
+**Solutions:**
+
+1. **Add the 2TB disk to Longhorn:**
+   ```bash
+   # Get the node name
+   kubectl get nodes.longhorn.io -n longhorn-system
+   
+   # Patch the node to add the 2TB disk
+   kubectl patch nodes.longhorn.io <node-name> -n longhorn-system \
+     --type='json' -p='[{"op": "add", "path": "/spec/disks/data-disk", "value": {"allowScheduling": true, "diskType": "filesystem", "path": "/data/persistent-storage", "storageReserved": 150000000000, "tags": []}}]'
+   ```
+
+2. **Verify the disk is added:**
+   ```bash
+   kubectl get nodes.longhorn.io <node-name> -n longhorn-system -o json | jq '.status.diskStatus'
+   ```
+
+3. **If volumes are stuck (faulted), delete and recreate:**
+   ```bash
+   # Delete stuck volume
+   kubectl delete volumes.longhorn.io <volume-name> -n longhorn-system
+   
+   # Delete the stuck pod
+   kubectl delete pod <pod-name> -n <namespace>
+   
+   # Recreate the deployment/pvc
+   kubectl apply -f <deployment.yaml>
+   ```
+
+4. **Disable the small local disk to prevent Longhorn using it:**
+   ```bash
+   kubectl patch nodes.longhorn.io <node-name> -n longhorn-system \
+     --type='json' -p='[{"op": "replace", "path": "/spec/disks/default-disk-<uuid>/allowScheduling", "value": false}]'
+   ```
+
+**Prevention:**
+When setting up a new cluster, ensure Longhorn is configured to use the mounted storage path from the start:
+- Edit the Longhorn StorageClass or node disk configuration before deploying workloads
+- Verify disk configuration with `kubectl get nodes.longhorn.io -o json | jq '.status.diskStatus'`
 
 ## Monitoring and Observability
 
