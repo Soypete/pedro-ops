@@ -60,10 +60,10 @@ done
 # Validate preset name
 if [[ -n "$PRESET" ]]; then
   case "$PRESET" in
-    text|code|vision|tts|all) ;;
+    text|vision|tts|all) ;;
     *)
       echo "ERROR: Unknown preset '$PRESET'"
-      echo "Valid presets: text, code, vision, tts, all"
+      echo "Valid presets: text, vision, tts, all"
       exit 1
       ;;
   esac
@@ -73,7 +73,6 @@ fi
 preset_file() {
   case "$1" in
     text)   echo "text.ini" ;;
-    code)   echo "code.ini" ;;
     vision) echo "vision.ini" ;;
     tts)    echo "tts.ini" ;;
     all)    echo "all-models.ini" ;;
@@ -123,7 +122,7 @@ else
 
     # Build extra flags for specific presets
     EXTRA_FLAGS=""
-    if [[ "$PRESET" == "code" || "$PRESET" == "all" ]]; then
+    if [[ "$PRESET" == "all" ]]; then
       # MoE expert offload: keep attention on GPU, experts in 64GB RAM
       EXTRA_FLAGS='    -ot ".ffn_.*_exps.=CPU" \\\n    --flash-attn on \\'
     fi

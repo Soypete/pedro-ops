@@ -8,13 +8,12 @@ Ref: [Model Management in llama.cpp](https://huggingface.co/blog/ggml-org/model-
 
 | Preset | Section Name | Model | Type | Use Case |
 |--------|-------------|-------|------|----------|
-| `text.ini` | `gpt-oss-20b` | GPT-OSS 20B Q4_K_M | Dense | General chat, reasoning (default) |
+| `text.ini` | `glm-4.7-flash` | GLM-4.7-Flash UD-Q6_K_XL | MoE (3B active) | General chat, reasoning (default) |
 | `text.ini` | `nemotron-3-super-120b` | Nemotron-3-Super 120B-A12B UD-Q4_K_XL | MoE (12B active) | Heavy reasoning |
-| `code.ini` | `qwen3-next-80b` | Qwen3-Next 80B-A3B UD-Q4_K_XL | MoE (3B active) | Code gen, expert offload |
-| `code.ini` | `qwen3-coder-30b` | Qwen3-Coder 30B-A3B Q4_K_M | MoE (3B active) | Code gen, fully GPU |
+| `text.ini` | `qwen3.6-27b` | Qwen3.6-27B Q4_K_S | Dense | Balanced chat |
+| `all-models.ini` | all of the above | — | Router | Dynamic switching via API |
 | `vision.ini` | `qwen2.5-vl-32b` | Qwen2.5-VL 32B Q4_K_M | Dense | Image understanding, OCR |
 | `tts.ini` | `qwen2.5-omni-7b` | Qwen2.5-Omni 7B | Dense | Text-to-speech (port 8001) |
-| `all-models.ini` | all of the above | — | Router | Dynamic switching via API |
 
 ## How It Works
 
@@ -30,29 +29,29 @@ llama-server \
   --host 0.0.0.0 --port 8080 \
   --metrics
 
-# Use the default model (gpt-oss-20b loads on startup)
+# Use the default model (glm-4.7-flash loads on startup)
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-oss-20b", "messages": [{"role": "user", "content": "hello"}]}'
+  -d '{"model": "glm-4.7-flash", "messages": [{"role": "user", "content": "hello"}]}'
 
-# Switch to coding model — server unloads gpt-oss, loads qwen3-coder
+# Switch to heavy reasoning — server unloads current model, loads nemotron
 curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "qwen3-coder-30b", "messages": [{"role": "user", "content": "write a go function"}]}'
+  -d '{"model": "nemotron-3-super-120b", "messages": [{"role": "user", "content": "solve this step by step"}]}'
 ```
 
 With `--models-max 1`, only one model occupies VRAM at a time. When you
 request a different model, the server evicts the current model from VRAM
 and loads the new one (~30s swap time).
 
-### MoE expert offload (Qwen3-Next 80B)
+### MoE expert offload
 
-For large MoE models, offload expert layers to system RAM while keeping
-attention on GPU. Add `-ot` to the CLI (not in the INI):
+For MoE models (GLM-4.7-Flash, nemotron-3-super-120b, qwen3-next-80b), offload
+expert layers to system RAM while keeping attention on GPU. Add `-ot` to the CLI:
 
 ```bash
 llama-server \
-  --models-preset /opt/llama.cpp/presets/code.ini \
+  --models-preset /opt/llama.cpp/presets/all-models.ini \
   -ot ".ffn_.*_exps.=CPU" \
   --flash-attn on \
   --host 0.0.0.0 --port 8080 \
@@ -79,7 +78,6 @@ llama-server \
 # Deploy and activate a preset
 ./scripts/pedrogpt/deploy-presets.sh --preset all
 ./scripts/pedrogpt/deploy-presets.sh --preset text
-./scripts/pedrogpt/deploy-presets.sh --preset code
 ```
 
 ## Downloading Models
@@ -89,25 +87,20 @@ Models live in `/opt/models/` on pedrogpt. Download with `huggingface-cli`:
 ```bash
 pip install huggingface_hub hf_transfer
 
-# Text
-hf download unsloth/gpt-oss-20b-GGUF \
-  --include "*Q4_K_M*" \
-  --local-dir /opt/models/gpt-oss-20b
+# Default chat (GLM-4.7-Flash)
+hf download unsloth/GLM-4.7-Flash-GGUF \
+  --include "*UD-Q6_K_XL*" \
+  --local-dir /opt/models/glm-4.7-flash
 
-# Text (heavy)
+# Heavy reasoning
 hf download unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF \
   --include "*UD-Q4_K_XL*" \
   --local-dir /opt/models/nemotron-3-super-120b
 
-# Coding
+# Coding (large context)
 hf download unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF \
   --include "*UD-Q4_K_XL*" \
   --local-dir /opt/models/qwen3-next-80b
-
-# Coding (lite)
-hf download unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF \
-  --include "*Q4_K_M*" \
-  --local-dir /opt/models/qwen3-coder-30b
 
 # Vision
 hf download Qwen/Qwen2.5-VL-32B-Instruct-GGUF \

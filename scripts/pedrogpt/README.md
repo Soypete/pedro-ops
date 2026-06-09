@@ -36,7 +36,7 @@ Expected output:
 "glm-4.7-flash"
 "nemotron-3-super-120b"
 "qwen3-next-80b"
-"qwen3-coder-30b"
+"qwen3-next-80b"
 "qwen2.5-vl-32b"
 ```
 
@@ -71,7 +71,7 @@ curl http://100.121.229.114:8080/v1/chat/completions \
 # Coding (lighter, faster)
 curl http://100.121.229.114:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "qwen3-coder-30b", "messages": [{"role": "user", "content": "write a Go HTTP server"}], "max_tokens": 500}'
+  -d '{"model": "qwen3-next-80b", "messages": [{"role": "user", "content": "write a Go HTTP server"}], "max_tokens": 500}'
 
 # Vision (pass image as base64 or URL)
 curl http://100.121.229.114:8080/v1/chat/completions \
