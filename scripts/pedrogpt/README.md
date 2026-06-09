@@ -107,6 +107,20 @@ The server uses `--pooling mean` which averages all token embeddings into a sing
 | `cls` | Use first token only |
 | `none` | Return per-token embeddings (not OAI compatible) |
 
+### Streaming Responses
+
+Add `"stream": true` to get token-by-token responses:
+
+```bash
+curl http://100.121.229.114:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-4.7-flash",
+    "messages": [{"role": "user", "content": "write a story"}],
+    "stream": true
+  }'
+```
+
 > **Note:** GLM-4.7-Flash and nemotron are reasoning models. They produce `reasoning_content`
 > internally before outputting `content`. Use `max_tokens >= 500` to get a complete response.
 
