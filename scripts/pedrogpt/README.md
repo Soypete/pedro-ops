@@ -16,6 +16,7 @@ Base URL: `http://100.121.229.114:8080`
 | `/health` | GET | Server health — returns `{"status":"ok"}` when ready |
 | `/v1/models` | GET | List all registered models |
 | `/v1/chat/completions` | POST | OpenAI-compatible chat completions |
+| `/v1/embeddings` | POST | Generate embeddings for text input |
 | `/metrics` | GET | Prometheus metrics |
 
 ### Check health
@@ -32,7 +33,7 @@ curl http://100.121.229.114:8080/v1/models | jq '.data[].id'
 
 Expected output:
 ```
-"gpt-oss-20b"
+"glm-4.7-flash"
 "nemotron-3-super-120b"
 "qwen3-next-80b"
 "qwen3-coder-30b"
@@ -48,10 +49,11 @@ loads the requested one (~30s swap time on first request).
 
 ```bash
 # General chat / reasoning (default, loads on startup)
+# GLM-4.7-Flash: MoE 30B (3B active), benchmarks: AIME 25: 91.6, GPQA: 75.2
 curl http://100.121.229.114:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-oss-20b",
+    "model": "glm-4.7-flash",
     "messages": [{"role": "user", "content": "explain recursion"}],
     "max_tokens": 500
   }'
@@ -85,9 +87,27 @@ curl http://100.121.229.114:8080/v1/chat/completions \
     }],
     "max_tokens": 300
   }'
+
+# Generate embeddings (uses currently loaded model)
+curl http://100.121.229.114:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "glm-4.7-flash",
+    "input": "The quick brown fox jumps over the lazy dog"
+  }'
 ```
 
-> **Note:** gpt-oss-20b and nemotron are reasoning models. They produce `reasoning_content`
+### Embeddings Pooling
+
+The server uses `--pooling mean` which averages all token embeddings into a single vector. This is OAI-compatible and works for most use cases.
+
+| Pooling | Description |
+|---------|-------------|
+| `mean` | Average all tokens (default, recommended) |
+| `cls` | Use first token only |
+| `none` | Return per-token embeddings (not OAI compatible) |
+
+> **Note:** GLM-4.7-Flash and nemotron are reasoning models. They produce `reasoning_content`
 > internally before outputting `content`. Use `max_tokens >= 500` to get a complete response.
 
 ---

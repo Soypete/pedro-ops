@@ -43,7 +43,7 @@ do_build() {
       arch="$compute"
       echo "Auto-detected CUDA architecture: sm_$arch"
     else
-      echo "ERROR: Cannot detect GPU. Specify --arch manually (e.g., --arch 89 or --arch 120)"
+      echo "ERROR: Cannot detect GPU. Specify --arch manually (e.g., --arch 89)"
       exit 1
     fi
   fi

@@ -66,7 +66,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# CUDA check — RTX 5090 (Blackwell, sm_120) requires CUDA 12.8+
+# CUDA check — RTX 5090 (Blackwell, sm_89) requires CUDA 12.8+
 # DO NOT use apt install nvidia-cuda-toolkit — it ships an old version.
 # Install from NVIDIA's official repo:
 #
@@ -100,11 +100,11 @@ else
   CUDA_MINOR=$(echo "$CUDA_VERSION" | cut -d. -f2)
   echo "CUDA $CUDA_VERSION detected"
 
-  # RTX 5090 (Blackwell sm_120) requires CUDA 12.8+
+  # RTX 5090 (Blackwell sm_89) requires CUDA 12.8+
   if [[ "$CUDA_MAJOR" -lt 12 ]] || [[ "$CUDA_MAJOR" -eq 12 && "$CUDA_MINOR" -lt 8 ]]; then
     echo ""
     echo "ERROR: CUDA $CUDA_VERSION is too old for RTX 5090 (Blackwell)."
-    echo "Blackwell (sm_120) requires CUDA 12.8 or newer."
+    echo "Blackwell (sm_89) requires CUDA 12.8 or newer."
     echo ""
     echo "Upgrade:"
     echo "  sudo apt-get install -y cuda-toolkit-12-8"
@@ -114,9 +114,9 @@ else
     exit 1
   fi
 
-  echo "CUDA $CUDA_VERSION OK — building with GGML_CUDA=ON, sm_120 (RTX 5090 Blackwell)"
+  echo "CUDA $CUDA_VERSION OK — building with GGML_CUDA=ON, sm_89 (RTX 5090 Blackwell)"
   CUDA_FLAG="-DGGML_CUDA=ON"
-  CUDA_ARCH_FLAG="-DCMAKE_CUDA_ARCHITECTURES=120"
+  CUDA_ARCH_FLAG="-DCMAKE_CUDA_ARCHITECTURES=89"
 fi
 
 # ---------------------------------------------------------------------------
@@ -167,8 +167,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
 # Switch models with: ./switch-model.sh <hf-repo> <hf-file>
 
 # HuggingFace repo and file (llama-server downloads and caches automatically)
-HF_REPO=unsloth/gpt-oss-20b-GGUF
-HF_FILE=gpt-oss-20b-Q4_K_M.gguf
+HF_REPO=unsloth/GLM-4.7-Flash-GGUF
+HF_FILE=GLM-4.7-Flash-UD-Q6_K_XL-00001-of-00002.gguf
 
 # HuggingFace cache directory (on the 2TB drive)
 HF_HOME=/opt/models/cache
@@ -190,15 +190,13 @@ HF_TOKEN=your_token_here
 
 # MoE expert layer offload pattern (set by switch-model.sh for MoE models).
 # Keeps expert weight tensors in 64GB RAM instead of VRAM — required for
-# models like Qwen3-Next-80B and Nemotron-120B to avoid OOM on 32GB VRAM.
-# Leave empty for dense models (gpt-oss-20b, etc).
-OVERRIDE_TENSOR=
+# models like GLM-4.7-Flash, Qwen3-Next-80B, and Nemotron-120B to avoid OOM on 32GB VRAM.
+OVERRIDE_TENSOR=.ffn_.*_exps.=CPU
 
 # Flash attention (set by switch-model.sh for MoE models).
 # Reduces KV cache VRAM usage — required alongside OVERRIDE_TENSOR for large
-# MoE models (Nemotron-120B, Qwen3-Next-80B) to avoid OOM on 32GB VRAM.
-# Set to 1 for MoE models, leave empty for dense models.
-FLASH_ATTN=
+# MoE models (GLM-4.7-Flash, Nemotron-120B, Qwen3-Next-80B) to avoid OOM on 32GB VRAM.
+FLASH_ATTN=1
 EOF
   echo "Edit $ENV_FILE before starting the service."
 else
@@ -257,6 +255,8 @@ exec /opt/llama.cpp/build/bin/llama-server \
     --jinja \
     --no-webui \
     --metrics \
+    --embeddings \
+    --pooling mean \
     "${EXTRA_ARGS[@]}"
 WRAPPER_EOF
 sudo chmod +x "$WRAPPER"

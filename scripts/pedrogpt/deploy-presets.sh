@@ -147,7 +147,9 @@ ExecStart=/opt/llama.cpp/build/bin/llama-server \\
     --models-max 1 \\
     --jinja \\
     --no-webui \\
-    --metrics$(if [[ -n "$EXTRA_FLAGS" ]]; then printf " \\\\\n$EXTRA_FLAGS"; fi)
+    --metrics \\
+    --embeddings \\
+    --pooling mean$(if [[ -n "$EXTRA_FLAGS" ]]; then printf " \\\\\n$EXTRA_FLAGS"; fi)
 CONF
 
     scp "$TMPCONF" "$REMOTE_HOST:/tmp/preset.conf"
