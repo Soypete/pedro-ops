@@ -10,7 +10,7 @@ model, or flags.
 
 ```bash
 cd scripts/pedrogpt/benchmark
-go run . -url http://pedrogpt:8000/v1 -model qwen3.6-27b-mtp -n 10
+go run . -url http://pedrogpt:8080/v1 -model qwen3.6-27b-mtp -n 10
 go run . -prompt "Write a Go HTTP server with graceful shutdown." -max-tokens 512
 ```
 
@@ -21,7 +21,7 @@ Flags: `-url`, `-model`, `-n`, `-max-tokens`, `-prompt`, `-warmup`.
 Skips unless `PEDROGPT_URL` is set, so `go test ./...` stays hermetic:
 
 ```bash
-PEDROGPT_URL=http://pedrogpt:8000/v1 PEDROGPT_MODEL=qwen3.6-27b-mtp \
+PEDROGPT_URL=http://pedrogpt:8080/v1 PEDROGPT_MODEL=qwen3.6-27b-mtp \
   go test -bench=ChatCompletion -benchtime=10x ./scripts/pedrogpt/benchmark/
 ```
 

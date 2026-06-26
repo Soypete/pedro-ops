@@ -16,7 +16,7 @@
 #   ./switch-model.sh download <hf-repo> <include-glob> <local-dir>   # fetch a new GGUF
 #
 # Examples:
-#   ./switch-model.sh /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-UD-Q4_K_XL.gguf qwen3.6-27b-mtp
+#   ./switch-model.sh /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-MTP-UD-Q4_K_XL.gguf qwen3.6-27b-mtp
 #   ./switch-model.sh download unsloth/Qwen3.6-27B-MTP-GGUF "*UD-Q4_K_XL*" /opt/models/qwen3.6-27b-mtp
 
 set -euo pipefail
@@ -50,7 +50,7 @@ if [[ -z "$MODEL_PATH" || -z "$MODEL_ALIAS" ]]; then
   echo "       $0 download <hf-repo> <include-glob> <local-dir>"
   echo ""
   echo "Example:"
-  echo "  $0 /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-UD-Q4_K_XL.gguf qwen3.6-27b-mtp"
+  echo "  $0 /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-MTP-UD-Q4_K_XL.gguf qwen3.6-27b-mtp"
   exit 1
 fi
 
@@ -85,8 +85,8 @@ sleep 5
 if sudo systemctl is-active --quiet llama-server; then
   echo ""
   echo "=== Active model: $MODEL_ALIAS ==="
-  echo "Health:  curl http://localhost:8000/health"
-  echo "Models:  curl http://localhost:8000/v1/models | jq '.data[].id'"
+  echo "Health:  curl http://localhost:8080/health"
+  echo "Models:  curl http://localhost:8080/v1/models | jq '.data[].id'"
   echo "Logs:    sudo journalctl -u llama-server -f"
 else
   echo "ERROR: llama-server failed to start"

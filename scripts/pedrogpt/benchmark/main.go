@@ -8,7 +8,7 @@
 //
 // Usage:
 //
-//	go run . -url http://pedrogpt:8000/v1 -model qwen3.6-27b-mtp -n 10
+//	go run . -url http://pedrogpt:8080/v1 -model qwen3.6-27b-mtp -n 10
 //	go run . -prompt "Write a Go HTTP server with graceful shutdown." -max-tokens 512
 //
 // The server must be started with timings enabled (default for llama-server). This
@@ -81,7 +81,7 @@ type runResult struct {
 
 func main() {
 	var (
-		url       = flag.String("url", "http://pedrogpt:8000/v1", "llama-server base URL")
+		url       = flag.String("url", "http://pedrogpt:8080/v1", "llama-server base URL")
 		model     = flag.String("model", "qwen3.6-27b-mtp", "model id (must match the server alias)")
 		n         = flag.Int("n", 5, "number of requests")
 		maxTokens = flag.Int("max-tokens", 256, "max tokens to generate per request")

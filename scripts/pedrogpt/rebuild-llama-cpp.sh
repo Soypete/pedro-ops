@@ -65,12 +65,9 @@ do_build() {
   echo "--- Building (this may take a few minutes) ---"
   # Clean stale build dir so cached CMake vars (forced cuBLAS, old arch) don't leak.
   sudo rm -rf build
-  # Pin the CUDA compiler by absolute path — sudo scrubs PATH, so a `which nvcc`
-  # in the user's shell won't be visible to the sudo'd cmake otherwise.
   sudo cmake -B build \
     -DGGML_CUDA=ON \
     -DCMAKE_CUDA_ARCHITECTURES="$arch" \
-    -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc \
     -DGGML_CUDA_FORCE_CUBLAS=OFF \
     -DCUDAToolkit_ROOT=/usr/local/cuda-12.8
   sudo cmake --build build --config Release -j"$(nproc)"

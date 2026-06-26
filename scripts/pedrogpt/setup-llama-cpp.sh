@@ -2,19 +2,18 @@
 
 # Setup llama.cpp on Ubuntu (pedrogpt) with CUDA support.
 # Builds llama-server and installs it as a systemd service that
-# exposes Prometheus metrics at :8000/metrics.
+# exposes Prometheus metrics at :8080/metrics.
 #
 # Usage: ./setup-llama-cpp-ubuntu.sh [--rebuild]
 #   --rebuild  Force a clean rebuild even if llama.cpp is already installed
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LLAMA_DIR="/opt/llama.cpp"
 MODEL_DIR="/opt/models"
 ENV_FILE="/etc/llama-server.env"
 SERVICE_FILE="/etc/systemd/system/llama-server.service"
-PORT=8000
+PORT=8080
 
 REBUILD=false
 for arg in "$@"; do
@@ -156,7 +155,6 @@ sudo rm -rf build
 sudo cmake -B build \
   ${CUDA_FLAG} \
   ${CUDA_ARCH_FLAG} \
-  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc \
   -DGGML_CUDA_FORCE_CUBLAS=OFF \
   -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 \
   -DCMAKE_BUILD_TYPE=Release \
@@ -194,7 +192,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 
 # Local GGUF path (downloaded by switch-model.sh / hf download). The MTP head is baked
 # into this checkpoint, so no separate draft model is needed.
-MODEL=/opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-UD-Q4_K_XL.gguf
+MODEL=/opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-MTP-UD-Q4_K_XL.gguf
 
 # API model id advertised at /v1/models and required in request "model" fields.
 MODEL_ALIAS=qwen3.6-27b-mtp
@@ -202,12 +200,12 @@ MODEL_ALIAS=qwen3.6-27b-mtp
 # HuggingFace cache directory (on the 2TB drive)
 HF_HOME=/opt/models/cache
 
-# GPU layers (-1 = all layers on GPU; the dense 27B fits fully in 32GB VRAM)
-N_GPU_LAYERS=-1
+# GPU layers (99 = all layers on GPU; the dense 27B fits fully in 32GB VRAM)
+N_GPU_LAYERS=99
 
-# Context window (tokens). 216064 fits alongside Q4 weights + MTP head + q8_0 KV cache —
-# Qwen3.6's hybrid DeltaNet/GQA layout keeps the KV cache small even at 200k+.
-N_CTX=216064
+# Context window (tokens). 65536 fits alongside Q4 weights + MTP head + q8_0 KV cache.
+# Qwen3.6's hybrid DeltaNet/GQA layout keeps the KV cache small; 131072 also fits if needed.
+N_CTX=65536
 
 # Parallel request slots — MUST be 1 for MTP.
 N_PARALLEL=1
@@ -217,10 +215,10 @@ N_PARALLEL=1
 BATCH=2048
 UBATCH=1024
 
-# MTP self-speculative decoding. SPEC_DRAFT_N = max draft tokens per step.
+# MTP self-speculative decoding. SPEC_DRAFT_N = max draft tokens per step (start 2, try 3).
 # Confirm the exact spec-type spelling for your build: llama-server --help | grep -i spec
 SPEC_TYPE=draft-mtp
-SPEC_DRAFT_N=2
+SPEC_DRAFT_N=3
 
 # KV cache quantization (q8_0 halves KV VRAM at negligible quality cost). Requires flash-attn.
 # K and V MUST match or llama.cpp silently falls back to the slow attention path.
@@ -235,7 +233,7 @@ PRESENCE_PENALTY=1.5
 MIN_P=0.0
 
 # Server port (Tailscale serve maps this to HTTPS)
-PORT=8000
+PORT=8080
 
 # HuggingFace token (required for model downloads — keep this file root-only)
 HF_TOKEN=your_token_here
@@ -249,19 +247,87 @@ fi
 
 # ---------------------------------------------------------------------------
 # Wrapper script — launches the dedicated Qwen3.6-27B MTP single-model server.
-# Installed from the committed run-server.sh (single source of truth, also used
-# by deploy-presets.sh). Reads /etc/llama-server.env.
+# Reads /etc/llama-server.env. Systemd ExecStart can't do conditional args, so
+# the launcher assembles the (optional MTP/KV-quant) flags here.
 # ---------------------------------------------------------------------------
 WRAPPER="$LLAMA_DIR/run-server.sh"
 echo "--- Installing launcher wrapper $WRAPPER ---"
-sudo cp "$SCRIPT_DIR/run-server.sh" "$WRAPPER"
+sudo tee "$WRAPPER" > /dev/null <<'WRAPPER_EOF'
+#!/bin/bash
+# llama-server launcher — reads /etc/llama-server.env and starts the tuned
+# Qwen3.6-27B MTP single-model server. Called by the llama-server systemd service.
+set -euo pipefail
+
+ENV_FILE="/etc/llama-server.env"
+# shellcheck source=/etc/llama-server.env
+source "$ENV_FILE"
+
+export HF_HOME="${HF_HOME:-/opt/models/cache}"
+export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}"
+
+EXTRA_ARGS=()
+
+# MTP self-speculative decoding (no separate draft model — the head is in the GGUF).
+if [[ -n "${SPEC_TYPE:-}" ]]; then
+  EXTRA_ARGS+=(--spec-type "${SPEC_TYPE}" --spec-draft-n-max "${SPEC_DRAFT_N:-3}")
+fi
+
+# Quantized KV cache (requires flash-attn; K and V must match).
+if [[ -n "${CACHE_TYPE_K:-}" ]]; then
+  EXTRA_ARGS+=(--cache-type-k "${CACHE_TYPE_K}" --cache-type-v "${CACHE_TYPE_V:-$CACHE_TYPE_K}")
+fi
+
+exec /opt/llama.cpp/build/bin/llama-server \
+    --host 0.0.0.0 \
+    --port "${PORT:-8080}" \
+    -m "${MODEL}" \
+    --alias "${MODEL_ALIAS:-qwen3.6-27b-mtp}" \
+    --ctx-size "${N_CTX:-65536}" \
+    --n-gpu-layers "${N_GPU_LAYERS:-99}" \
+    --parallel "${N_PARALLEL:-1}" \
+    --batch-size "${BATCH:-2048}" \
+    --ubatch-size "${UBATCH:-1024}" \
+    --flash-attn on \
+    --mlock \
+    --jinja \
+    --no-webui \
+    --metrics \
+    --embeddings \
+    --pooling mean \
+    --temp "${TEMP:-0.7}" \
+    --top-k "${TOP_K:-20}" \
+    --top-p "${TOP_P:-0.8}" \
+    --presence-penalty "${PRESENCE_PENALTY:-1.5}" \
+    --min-p "${MIN_P:-0.0}" \
+    --chat-template-kwargs '{"enable_thinking":false}' \
+    "${EXTRA_ARGS[@]}"
+WRAPPER_EOF
 sudo chmod +x "$WRAPPER"
 
 # ---------------------------------------------------------------------------
 # Systemd service
 # ---------------------------------------------------------------------------
-echo "--- Installing systemd service (from committed llama-server.service) ---"
-sudo install -m 0644 "$SCRIPT_DIR/llama-server.service" "$SERVICE_FILE"
+echo "--- Installing systemd service ---"
+sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=llama.cpp Server
+Documentation=https://github.com/ggml-org/llama.cpp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$LLAMA_DIR/run-server.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=llama-server
+SupplementaryGroups=render video
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable llama-server
@@ -283,7 +349,7 @@ echo "       sudo systemctl start llama-server"
 echo "       sudo systemctl status llama-server"
 echo ""
 echo "  4. Verify it's serving the MTP model and metrics:"
-echo "       curl http://localhost:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp"
-echo "       curl http://localhost:8000/metrics | head -20"
+echo "       curl http://localhost:8080/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp"
+echo "       curl http://localhost:8080/metrics | head -20"
 echo ""
 echo "  Logs: sudo journalctl -u llama-server -f"

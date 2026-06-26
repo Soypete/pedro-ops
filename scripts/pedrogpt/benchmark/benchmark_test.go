@@ -12,12 +12,12 @@ import (
 // as a custom metric. It is skipped unless PEDROGPT_URL is set, so `go test ./...`
 // stays hermetic in CI.
 //
-//	PEDROGPT_URL=http://pedrogpt:8000/v1 PEDROGPT_MODEL=qwen3.6-27b-mtp \
+//	PEDROGPT_URL=http://pedrogpt:8080/v1 PEDROGPT_MODEL=qwen3.6-27b-mtp \
 //	  go test -bench=ChatCompletion -benchtime=10x ./scripts/pedrogpt/benchmark/
 func BenchmarkChatCompletion(b *testing.B) {
 	base := os.Getenv("PEDROGPT_URL")
 	if base == "" {
-		b.Skip("set PEDROGPT_URL to run the live benchmark (e.g. http://pedrogpt:8000/v1)")
+		b.Skip("set PEDROGPT_URL to run the live benchmark (e.g. http://pedrogpt:8080/v1)")
 	}
 	model := os.Getenv("PEDROGPT_MODEL")
 	if model == "" {

@@ -15,7 +15,7 @@ The service is launched by `/opt/llama.cpp/run-server.sh` from `/etc/llama-serve
 
 ## Endpoints
 
-Base URL: `http://100.121.229.114:8000`
+Base URL: `http://100.121.229.114:8080`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -28,13 +28,13 @@ Base URL: `http://100.121.229.114:8000`
 ### Check health
 
 ```bash
-curl http://100.121.229.114:8000/health
+curl http://100.121.229.114:8080/health
 ```
 
 ### List registered models
 
 ```bash
-curl http://100.121.229.114:8000/v1/models | jq '.data[].id'
+curl http://100.121.229.114:8080/v1/models | jq '.data[].id'
 ```
 
 Expected output:
@@ -50,7 +50,7 @@ There is one model id: **`qwen3.6-27b-mtp`**. Pass it in the `"model"` field (Op
 
 ```bash
 # Chat / reasoning / coding — one tuned model for everything
-curl http://100.121.229.114:8000/v1/chat/completions \
+curl http://100.121.229.114:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-27b-mtp",
@@ -59,7 +59,7 @@ curl http://100.121.229.114:8000/v1/chat/completions \
   }'
 
 # Generate embeddings
-curl http://100.121.229.114:8000/v1/embeddings \
+curl http://100.121.229.114:8080/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-27b-mtp",
@@ -75,7 +75,7 @@ Single-model mode has no on-the-fly router. To change the model, update
 ```bash
 ssh pedrogpt
 ./switch-model.sh download unsloth/Qwen3.6-27B-MTP-GGUF "*UD-Q4_K_XL*" /opt/models/qwen3.6-27b-mtp
-./switch-model.sh /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-UD-Q4_K_XL.gguf qwen3.6-27b-mtp
+./switch-model.sh /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-MTP-UD-Q4_K_XL.gguf qwen3.6-27b-mtp
 ```
 
 ### Embeddings Pooling
@@ -93,7 +93,7 @@ The server uses `--pooling mean` which averages all token embeddings into a sing
 Add `"stream": true` to get token-by-token responses:
 
 ```bash
-curl http://100.121.229.114:8000/v1/chat/completions \
+curl http://100.121.229.114:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-27b-mtp",
@@ -145,7 +145,7 @@ ssh soypete@100.121.229.114 "systemctl cat llama-server"
 ### Verify the loaded model and MTP
 
 ```bash
-curl http://100.121.229.114:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp
+curl http://100.121.229.114:8080/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp
 # MTP / spec-decoding shows up in the startup logs:
 ssh soypete@100.121.229.114 "sudo journalctl -u llama-server | grep -i 'spec\|draft\|mtp' | tail"
 ```
@@ -196,7 +196,7 @@ multi-model switching.
 ### Check Prometheus metrics
 
 ```bash
-curl http://100.121.229.114:8000/metrics | grep -E 'llama_|requests_'
+curl http://100.121.229.114:8080/metrics | grep -E 'llama_|requests_'
 ```
 
 ### GPU memory usage
@@ -215,6 +215,6 @@ ssh soypete@100.121.229.114 "nvidia-smi --query-gpu=memory.used,memory.free,memo
 | `/opt/llama.cpp/build/bin/llama-server` | server binary |
 | `/opt/llama.cpp/run-server.sh` | launcher wrapper (reads the env file, assembles MTP/KV flags) |
 | `/opt/models/qwen3.6-27b-mtp/` | the MTP GGUF |
-| `/etc/systemd/system/llama-server.service` | systemd unit (deployed from `scripts/pedrogpt/llama-server.service`) |
+| `/etc/systemd/system/llama-server.service` | systemd unit (runs `run-server.sh`) |
 | `/etc/llama-server.env` | runtime config: `MODEL`, `MODEL_ALIAS`, `SPEC_TYPE`, `N_CTX`, sampling, etc. |
 | `scripts/pedrogpt/presets/all-models.ini` | rollback/reference INI for router mode (not used live) |
