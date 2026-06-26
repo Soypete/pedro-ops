@@ -1,26 +1,116 @@
-# From 11 to ~100 tok/s: Making llama.cpp Fast on an RTX 5090 with Qwen3.6-27B MTP
+# Upgrading llama.cpp to Multi-Token Prediction (MTP) — and what MTP actually is
 
 We run a local inference box, **pedrogpt** — an NVIDIA RTX 5090 (32 GB VRAM, Blackwell) with
 64 GB of system RAM, reached over Tailscale — serving an OpenAI-compatible `llama-server` to a
-handful of bots and agents. It was generating at **~11 tokens/second** on a 4-bit 27B model. That's
-*wrong* for this hardware by roughly an order of magnitude, and chasing down why turned into a tour of
-the things that quietly wreck llama.cpp performance on a brand-new GPU.
+handful of bots and agents. This post is about upgrading it to **Multi-Token Prediction (MTP)**: what
+MTP is, why it makes generation faster for free, and exactly how we switched our server over to the
+unsloth `Qwen3.6-27B-MTP-GGUF` model.
 
-Two changes took us from 11 tok/s to the high double / triple digits:
+It ended at **~83 tokens/second** — but it started at ~11, and most of *that* gap turned out to be a
+mis-built CUDA backend, not MTP. So there are really two parts here:
 
-1. **Rebuilding llama.cpp correctly for Blackwell** (the build was the real culprit).
-2. **Switching to a Multi-Token Prediction (MTP) model** for a further free speedup.
+1. **What MTP is and how to turn it on** (the main event).
+2. **The Blackwell build prerequisite** — because MTP can't help if your CUDA build is quietly
+   falling back to a slow path, which ours was.
 
-Here's the whole story, with the *why* behind every flag.
+We'll take MTP first, then the build, then the flags and the numbers — with the *why* behind each.
 
 ---
 
-## Part 1: The build was lying to us
+## Part 1: What MTP is, and how we turned it on
 
-`llama-server` started fine, loaded the model, answered requests — nothing *looked* broken. But
-11 tok/s on a 5090 for a 4-bit 27B is absurd; this card should be several times faster. When inference
-is mysteriously slow and nothing errors, the CUDA backend is almost always mis-built. Three traps, in
-the order they bit us:
+### The idea
+
+Normally an LLM generates **one token per forward pass** — a strictly sequential loop, and that
+sequential dependency is what makes generation feel slow. **Multi-Token Prediction** breaks the loop
+with *self-speculative decoding*:
+
+- The checkpoint ships with a small extra **draft head** that, given the current state, **proposes the
+  next few tokens** cheaply.
+- The full model then **verifies all of those proposed tokens in a single parallel forward pass**.
+- Every proposed token that matches what the full model would have produced is **kept**; the first
+  mismatch and everything after it is **thrown away** and regenerated normally.
+
+Because rejected drafts are discarded, the output is **mathematically identical** to ordinary
+decoding — same text, same distribution. You are not trading quality for speed. You're just letting
+the model commit several tokens per step when it's confident, instead of one at a time.
+
+The "draft model" here isn't a separate model — it's a head baked **into the same GGUF**, so unlike
+classic speculative decoding there's **no second model to download, load, or keep in sync**. That's
+what makes it a near-free upgrade: swap the model file, add two flags.
+
+How much faster depends on the **acceptance rate** — how often the draft guesses right. Predictable
+text (code, structured output) accepts more; on our mixed workload we saw ~50% acceptance and a solid
+speedup. Published numbers land around **1.4–2.2x**.
+
+### The one real constraint
+
+**MTP currently requires a single request stream (`--parallel 1`).** It can't be combined with
+multi-slot continuous batching, so it's ideal for a single-user-at-a-time box and not (yet) for a
+high-concurrency multi-tenant server. For pedrogpt — one model, serving a handful of bots
+sequentially — that's no cost at all, so we dedicated the box to a single MTP model.
+
+### Turning it on
+
+1. **Get an MTP build of llama.cpp.** MTP for Qwen3.6 landed in
+   [PR #22673](https://github.com/ggml-org/llama.cpp/pull/22673); you need master at/after it. Confirm
+   your binary has it and check the exact flag spelling:
+   ```bash
+   llama-server --help | grep -i spec
+   # ours listed:  --spec-type none,draft-simple,draft-eagle3,draft-mtp,ngram-...
+   ```
+2. **Download an MTP GGUF.** We used
+   [`unsloth/Qwen3.6-27B-MTP-GGUF`](https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF) at UD-Q4_K_XL
+   (~17 GB — note the file is named `Qwen3.6-27B-UD-Q4_K_XL.gguf`; the MTP head is inside it):
+   ```bash
+   hf download unsloth/Qwen3.6-27B-MTP-GGUF --include "*UD-Q4_K_XL*" \
+     --local-dir /opt/models/qwen3.6-27b-mtp
+   ```
+3. **Add the two flags** (start at 2, try 3; higher only helps while acceptance stays high):
+   ```
+   --spec-type draft-mtp --spec-draft-n-max 3
+   ```
+
+When it's working you'll see the draft context initialize in the logs:
+
+```
+srv  load_model: [spec] estimated memory usage of MTP context is 520.03 MiB
+common_speculative_impl_draft_mtp: adding speculative implementation 'draft-mtp'
+common_speculative_impl_draft_mtp: - n_max=3, n_min=0, p_min=0.00, n_embd=5120
+srv  load_model: speculative decoding context initialized
+srv  server is listening on http://0.0.0.0:8080
+```
+
+### The gotcha that cost us: `--embeddings` is incompatible with the MTP graph
+
+Our old server ran `--embeddings --pooling mean` so it could double as an embedding endpoint. With the
+MTP model that **crash-loops on load**:
+
+```
+llama-graph.cpp: GGML_ASSERT(inp != nullptr && "missing result_norm/result_embd tensor") failed
+llama-server.service: Failed with result 'core-dump'
+```
+
+The embeddings output graph can't be built alongside the MTP spec-decoding graph. The fix is to make
+the box **chat-only** and move embeddings to a separate process/model. Drop `--embeddings`/`--pooling`
+and it loads clean. (Our launcher now makes embeddings strictly opt-in so this can't sneak back in.)
+
+---
+
+## Part 2: The build prerequisite — a mis-built backend was the real bottleneck
+
+Here's the honest part. Before MTP, this box generated at ~11 tok/s — and MTP is a ~1.4–2.2x lever,
+nowhere near enough to explain that. The real culprit was the CUDA build. `llama-server` started fine,
+loaded the model, answered requests — nothing *looked* broken. But 11 tok/s on a 5090 for a 4-bit 27B
+is absurd; this card should be several times faster. When inference is mysteriously slow and nothing
+errors, the CUDA backend is almost always mis-built. Three traps, in the order they bit us — plus a
+driver one:
+
+> **The driver trap that started it all.** Before any of these, `nvidia-smi` itself failed with
+> `Driver/library version mismatch` — the loaded kernel module (580.126) didn't match the upgraded
+> userspace (580.167) after an unattended driver upgrade. In that state CUDA can't initialize and work
+> effectively falls off the GPU. A `modprobe -r nvidia... && modprobe nvidia` (no reinstall) fixed it.
+> If `nvidia-smi` won't even talk to the card, fix that *first* — nothing else matters until it does.
 
 ### Trap 1: the wrong compute architecture
 
@@ -71,36 +161,8 @@ grep FORCE_CUBLAS build/CMakeCache.txt   # expect: ...=OFF
 > doesn't reliably disable it. Use CUDA 12.8 and a recent master where it's fixed. It only affects
 > MXFP4 models (e.g. GPT-OSS) at build time — K-quant GGUFs like Qwen3.6 are unaffected at runtime.
 
-**A correct build alone took us from ~11 tok/s into the high double digits**, before touching the
-model. If you take one thing from this post: on a new GPU, *suspect the build first*.
-
----
-
-## Part 2: Multi-Token Prediction (MTP) — a free speedup
-
-Once the build was healthy, we swapped the plain Qwen3.6-27B GGUF for
-[`unsloth/Qwen3.6-27B-MTP-GGUF`](https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF).
-
-**What MTP is:** normally an LLM generates one token per forward pass. MTP bakes a small *draft head*
-into the checkpoint that proposes several upcoming tokens at once; the main model then **verifies them
-in parallel in a single forward pass**, and only verified tokens are kept. It's *self-speculative
-decoding* — the draft model lives inside the same GGUF, so there's no second model to load or manage.
-Because rejected drafts are thrown away, the output distribution is **identical** to ordinary
-decoding: same answers, just faster.
-
-Reported speedups are **~1.4–2.2x** depending on how predictable the text is (acceptance rate). The
-tradeoffs are small: ~2 GB extra VRAM for the draft head, a slight prompt-processing penalty, and one
-hard constraint — **MTP currently requires a single request stream (`--parallel 1`)**, so it can't be
-combined with multi-slot continuous batching. For a single-user-at-a-time box like ours, that's free.
-
-Enabling it (confirm the exact spelling for your build with `llama-server --help | grep -i spec`):
-
-```
---spec-type draft-mtp --spec-draft-n-max 3
-```
-
-`--spec-draft-n-max` is how many tokens the draft head proposes per step. Start at 2, try 3; going
-higher only helps while acceptance stays high.
+**A correct build alone took us from ~11 tok/s into the high double digits**, before MTP did anything.
+If you take one thing from this post: on a new GPU, *suspect the build first*.
 
 ---
 
@@ -172,29 +234,45 @@ Throughput claims are worthless without numbers, so we benchmark every change wi
 
 ### Results
 
-<!-- TODO(box-step): fill in after running the benchmark on pedrogpt -->
+Measured on pedrogpt (RTX 5090, 32 GB) via the Go harness — 10 requests, 256 max tokens,
+short prompt, generation t/s from llama.cpp's own `timings`:
 
-| Stage | Build | Model | Gen tok/s | Prompt tok/s | Notes |
-|-------|-------|-------|-----------|--------------|-------|
-| Before | sm_89 / suspect CUDA | Qwen3.6-27B Q4_K_S | ~11 | — | the starting point |
-| After rebuild | sm_120 + CUDA 12.8 + MMQ | Qwen3.6-27B Q4_K_S | _TBD_ | _TBD_ | build fix alone |
-| After MTP | sm_120 + CUDA 12.8 | Qwen3.6-27B-MTP UD-Q4_K_XL | _TBD_ | _TBD_ | + `--spec-type draft-mtp` |
+| Stage | Build | Model | Gen tok/s | Notes |
+|-------|-------|-------|-----------|-------|
+| Before | broken (driver NVML mismatch + sm_89/suspect CUDA) | Qwen3.6-27B Q4_K_S | ~11 | effectively falling back off the GPU |
+| After | sm_120 + CUDA 12.8 + MMQ, MTP | Qwen3.6-27B-MTP UD-Q4_K_XL | **82.7 median** (75.7–87.5) | + `--spec-type draft-mtp` |
 
-_(MTP draft acceptance observed: _TBD_%.)_
+**~7.5x faster.** Supporting numbers from the "after" run: prompt eval 107.5 t/s, TTFT p50
+168.8 ms, total-latency p50 1.08 s, and **MTP draft acceptance ~50.7% median**. VRAM at runtime:
+~20.4 GB of 32 GB used (Q4 weights + ~520 MiB MTP draft context + q8_0 KV for 65K ctx), fully on GPU.
+
+Two honest caveats:
+- **We can't cleanly split build-vs-MTP from these two rows.** The "before" box was in a driver NVML
+  mismatch that effectively kept work off the GPU, so the bulk of the 7.5x is the build fix — MTP is a
+  ~1.4–2.2x layer on top of an already-healthy build, not the source of the order-of-magnitude jump.
+  We didn't capture a "fixed build, MTP off" baseline before retiring the old model, so treat the
+  split as "mostly build, MTP on top" rather than a precise attribution. (To measure it yourself: run
+  the same MTP model with `--spec-type` removed on a scratch port and diff the gen t/s.)
+- 50.7% draft acceptance is moderate (some workloads hit ~75%), so there's likely more headroom in
+  `--spec-draft-n-max` tuning and prompt characteristics.
 
 ---
 
 ## Takeaways
 
-1. **On a new GPU, suspect the build before the model.** Wrong arch, wrong CUDA major version, or a
-   stale CMake cache will silently cost you 5x and never throw an error.
-2. **Use the CUDA 12.8 toolkit on Blackwell**, not 13.x, until the MMQ-kernel regression is resolved.
+1. **MTP is a genuinely free speedup** for single-stream serving: same outputs (drafts that don't
+   match are discarded), ~1.4–2.2x faster, no second model to manage — as long as you can live with
+   `--parallel 1`. Enable it with `--spec-type draft-mtp --spec-draft-n-max 3` on an MTP GGUF.
+2. **MTP and `--embeddings` don't mix** on this model — the embeddings graph crashes the server on
+   load. Make the box chat-only and serve embeddings from a separate process.
+3. **On a new GPU, suspect the build (and driver) before the model.** Wrong arch, wrong CUDA major
+   version, a stale CMake cache, or an `nvidia-smi` driver mismatch will silently cost you 5x+ and
+   never throw a useful error. ~11 tok/s on a 5090 is a backend problem, not a model problem.
+4. **Use the CUDA 12.8 toolkit on Blackwell**, not 13.x, until the MMQ-kernel regression is resolved.
    Build for `sm_120`, force cuBLAS *off*, and `rm -rf build` before reconfiguring.
-3. **MTP is a genuinely free speedup** for single-stream serving: same outputs, ~1.4–2.2x faster, no
-   second model — as long as you can live with `--parallel 1`.
-4. **Flash attention + quantized KV cache (K=V)** is the combination that buys you long context on a
+5. **Flash attention + quantized KV cache (K=V)** is the combination that buys you long context on a
    32 GB card. Don't offload experts on a dense model that already fits.
-5. **Measure with the server's own `timings`.** Client-side wall-clock hides where the time goes;
+6. **Measure with the server's own `timings`.** Client-side wall-clock hides where the time goes;
    `prompt_per_second` / `predicted_per_second` (and draft acceptance) tell the real story.
 
 ---

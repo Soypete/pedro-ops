@@ -25,6 +25,14 @@ if [[ -n "${CACHE_TYPE_K:-}" ]]; then
   EXTRA_ARGS+=(--cache-type-k "${CACHE_TYPE_K}" --cache-type-v "${CACHE_TYPE_V:-$CACHE_TYPE_K}")
 fi
 
+# Embeddings endpoint — opt-in only. Enabling it builds an embeddings output graph
+# that is incompatible with some models / the MTP spec-decoding graph and will
+# crash the server on load (GGML_ASSERT "missing result_norm/result_embd tensor").
+# Leave EMBEDDINGS unset for a chat-completions-only server.
+if [[ "${EMBEDDINGS:-}" == "1" ]]; then
+  EXTRA_ARGS+=(--embeddings --pooling "${POOLING:-mean}")
+fi
+
 exec /opt/llama.cpp/build/bin/llama-server \
     --host 0.0.0.0 \
     --port "${PORT:-8080}" \
@@ -40,8 +48,6 @@ exec /opt/llama.cpp/build/bin/llama-server \
     --jinja \
     --no-webui \
     --metrics \
-    --embeddings \
-    --pooling mean \
     --temp "${TEMP:-0.7}" \
     --top-k "${TOP_K:-20}" \
     --top-p "${TOP_P:-0.8}" \
