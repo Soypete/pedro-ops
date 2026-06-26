@@ -113,8 +113,8 @@ sleep 5
 if ssh -tt "$REMOTE_HOST" "sudo systemctl is-active --quiet $SERVICE_NAME"; then
   echo ""
   echo "=== $SERVICE_NAME active on $REMOTE_HOST ==="
-  echo "Health:  curl http://$REMOTE_HOST:8080/health"
-  echo "Models:  curl http://$REMOTE_HOST:8080/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp"
+  echo "Health:  curl http://$REMOTE_HOST:8000/health"
+  echo "Models:  curl http://$REMOTE_HOST:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp"
   echo "Logs:    ssh $REMOTE_HOST sudo journalctl -u $SERVICE_NAME -f"
 else
   echo "ERROR: $SERVICE_NAME failed to start"

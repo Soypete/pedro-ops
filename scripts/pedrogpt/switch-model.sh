@@ -85,8 +85,8 @@ sleep 5
 if sudo systemctl is-active --quiet llama-server; then
   echo ""
   echo "=== Active model: $MODEL_ALIAS ==="
-  echo "Health:  curl http://localhost:8080/health"
-  echo "Models:  curl http://localhost:8080/v1/models | jq '.data[].id'"
+  echo "Health:  curl http://localhost:8000/health"
+  echo "Models:  curl http://localhost:8000/v1/models | jq '.data[].id'"
   echo "Logs:    sudo journalctl -u llama-server -f"
 else
   echo "ERROR: llama-server failed to start"

@@ -153,18 +153,24 @@ sudo journalctl -u llama-server -n 50
 - **Config**: `/etc/llama-server.env`
 - **Service**: `/etc/systemd/system/llama-server.service`
 
-## Embeddings
+## Embeddings — run a separate server, not this one
 
-Enable embeddings with these flags in the systemd service:
+**Do not add `--embeddings` to the MTP chat server.** The embeddings output graph is incompatible
+with the MTP spec-decoding graph and crashes the server on load
+(`GGML_ASSERT(... "missing result_norm/result_embd tensor")`). One process cannot serve both.
 
-```ini
---embeddings \
---pooling mean
+Embeddings run on a dedicated CPU llama.cpp server (the same `llama-server` binary works — embeddings
+only fail when MTP is *also* enabled). In this stack that's a sidecar in the twitch-bot pod
+(`iam_pedro/deployment/embed/`, model `nomic-embed-text`, 768-dim) launched with:
+
+```
+llama-server -m nomic-embed-text.gguf --alias nomic-embed-text \
+  --embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048 --batch-size 2048
 ```
 
-- `--pooling mean` - Average all token embeddings (OAI compatible, recommended)
-- `--pooling cls` - Use first token (CLS) - sometimes better for classification
-- `--pooling none` - Return per-token embeddings (not OAI compatible)
+- `--pooling mean` - average all token embeddings (OAI compatible, recommended)
+- `--ubatch-size >= --batch-size` is required for non-causal embedding models
+- `--pooling cls` / `none` - first-token / per-token (per-token is not OAI compatible)
 
 ## Quick Reference
 
@@ -181,8 +187,8 @@ ssh soypete@100.121.229.114 "sudo journalctl -u llama-server -f"
 # Check GPU
 ssh soypete@100.121.229.114 "nvidia-smi"
 
-# Test embeddings
-curl http://100.121.229.114:8000/v1/embeddings \
+# Test embeddings (separate sidecar on :8081, NOT the chat server)
+curl http://localhost:8081/v1/embeddings \
   -H "Content-Type: application/json" \
-  -d '{"model": "glm-4.7-flash", "input": "Hello world"}'
+  -d '{"model": "nomic-embed-text", "input": "Hello world"}'
 ```

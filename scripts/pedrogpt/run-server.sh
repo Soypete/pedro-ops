@@ -35,7 +35,7 @@ fi
 
 exec /opt/llama.cpp/build/bin/llama-server \
     --host 0.0.0.0 \
-    --port "${PORT:-8080}" \
+    --port "${PORT:-8000}" \
     -m "${MODEL}" \
     --alias "${MODEL_ALIAS:-qwen3.6-27b-mtp}" \
     --ctx-size "${N_CTX:-65536}" \

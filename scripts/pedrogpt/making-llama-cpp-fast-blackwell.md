@@ -78,7 +78,7 @@ srv  load_model: [spec] estimated memory usage of MTP context is 520.03 MiB
 common_speculative_impl_draft_mtp: adding speculative implementation 'draft-mtp'
 common_speculative_impl_draft_mtp: - n_max=3, n_min=0, p_min=0.00, n_embd=5120
 srv  load_model: speculative decoding context initialized
-srv  server is listening on http://0.0.0.0:8080
+srv  server is listening on http://0.0.0.0:8000
 ```
 
 ### The gotcha that cost us: `--embeddings` is incompatible with the MTP graph
@@ -173,7 +173,7 @@ Here's the full tuned launch for a dense 27B on a 32 GB 5090, with the reasoning
 ```bash
 llama-server \
   -m /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-MTP-UD-Q4_K_XL.gguf \
-  --alias qwen3.6-27b-mtp --host 0.0.0.0 --port 8080 \
+  --alias qwen3.6-27b-mtp --host 0.0.0.0 --port 8000 \
   -ngl 99 \
   -c 65536 \
   -fa on \

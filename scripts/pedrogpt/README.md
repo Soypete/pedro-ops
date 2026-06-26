@@ -13,28 +13,42 @@ The service is launched by `/opt/llama.cpp/run-server.sh` from `/etc/llama-serve
 
 ---
 
-## Endpoints
+## Topology: two servers (chat + embeddings)
 
-Base URL: `http://100.121.229.114:8080`
+MTP and the embeddings endpoint **cannot run in one llama-server process** — the embeddings output
+graph crashes the MTP spec-decoding graph on load. So serving is split:
+
+| Server | Where | Model | Purpose |
+|--------|-------|-------|---------|
+| **chat** | `pedrogpt:8000` (this guide) | `qwen3.6-27b-mtp` (MTP) | chat completions — **no embeddings** |
+| **embeddings** | sidecar in the twitch-bot pod, `localhost:8081` | `nomic-embed-text` (768-dim) | `/v1/embeddings` for mem-palace / FAQ |
+
+The embeddings sidecar is a CPU-only llama.cpp build (`--embeddings --pooling mean`); see
+`iam_pedro/deployment/embed/` for its Dockerfile. This guide covers the chat server only.
+
+## Endpoints (chat server)
+
+Base URL: `http://100.121.229.114:8000`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Server health — returns `{"status":"ok"}` when ready |
-| `/v1/models` | GET | List all registered models |
+| `/v1/models` | GET | List the model (`qwen3.6-27b-mtp`) |
 | `/v1/chat/completions` | POST | OpenAI-compatible chat completions |
-| `/v1/embeddings` | POST | Generate embeddings for text input |
 | `/metrics` | GET | Prometheus metrics |
+
+> `/v1/embeddings` is **not** served here — use the embeddings sidecar (`:8081`).
 
 ### Check health
 
 ```bash
-curl http://100.121.229.114:8080/health
+curl http://100.121.229.114:8000/health
 ```
 
 ### List registered models
 
 ```bash
-curl http://100.121.229.114:8080/v1/models | jq '.data[].id'
+curl http://100.121.229.114:8000/v1/models | jq '.data[].id'
 ```
 
 Expected output:
@@ -50,7 +64,7 @@ There is one model id: **`qwen3.6-27b-mtp`**. Pass it in the `"model"` field (Op
 
 ```bash
 # Chat / reasoning / coding — one tuned model for everything
-curl http://100.121.229.114:8080/v1/chat/completions \
+curl http://100.121.229.114:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-27b-mtp",
@@ -58,13 +72,10 @@ curl http://100.121.229.114:8080/v1/chat/completions \
     "max_tokens": 500
   }'
 
-# Generate embeddings
-curl http://100.121.229.114:8080/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "qwen3.6-27b-mtp",
-    "input": "The quick brown fox jumps over the lazy dog"
-  }'
+# Generate embeddings — NOT on this server. Use the embeddings sidecar (:8081):
+#   curl http://localhost:8081/v1/embeddings \
+#     -H "Content-Type: application/json" \
+#     -d '{"model": "nomic-embed-text", "input": "The quick brown fox"}'
 ```
 
 ### Swapping the model later
@@ -78,22 +89,19 @@ ssh pedrogpt
 ./switch-model.sh /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-MTP-UD-Q4_K_XL.gguf qwen3.6-27b-mtp
 ```
 
-### Embeddings Pooling
+### Embeddings (separate sidecar)
 
-The server uses `--pooling mean` which averages all token embeddings into a single vector. This is OAI-compatible and works for most use cases.
-
-| Pooling | Description |
-|---------|-------------|
-| `mean` | Average all tokens (default, recommended) |
-| `cls` | Use first token only |
-| `none` | Return per-token embeddings (not OAI compatible) |
+Embeddings are served by a dedicated CPU llama.cpp sidecar (`nomic-embed-text`, 768-dim,
+`--pooling mean`) running on `localhost:8081` in the twitch-bot pod — **not** by this chat server.
+See `iam_pedro/deployment/embed/` for the image and `iam_pedro/charts/pedro-bots` for the sidecar
+wiring. The split exists because MTP and the embeddings graph can't coexist in one llama-server.
 
 ### Streaming Responses
 
 Add `"stream": true` to get token-by-token responses:
 
 ```bash
-curl http://100.121.229.114:8080/v1/chat/completions \
+curl http://100.121.229.114:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-27b-mtp",
@@ -145,7 +153,7 @@ ssh soypete@100.121.229.114 "systemctl cat llama-server"
 ### Verify the loaded model and MTP
 
 ```bash
-curl http://100.121.229.114:8080/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp
+curl http://100.121.229.114:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp
 # MTP / spec-decoding shows up in the startup logs:
 ssh soypete@100.121.229.114 "sudo journalctl -u llama-server | grep -i 'spec\|draft\|mtp' | tail"
 ```
@@ -196,7 +204,7 @@ multi-model switching.
 ### Check Prometheus metrics
 
 ```bash
-curl http://100.121.229.114:8080/metrics | grep -E 'llama_|requests_'
+curl http://100.121.229.114:8000/metrics | grep -E 'llama_|requests_'
 ```
 
 ### GPU memory usage

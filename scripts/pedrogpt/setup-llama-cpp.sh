@@ -2,7 +2,7 @@
 
 # Setup llama.cpp on Ubuntu (pedrogpt) with CUDA support.
 # Builds llama-server and installs it as a systemd service that
-# exposes Prometheus metrics at :8080/metrics.
+# exposes Prometheus metrics at :8000/metrics.
 #
 # Usage: ./setup-llama-cpp-ubuntu.sh [--rebuild]
 #   --rebuild  Force a clean rebuild even if llama.cpp is already installed
@@ -14,7 +14,7 @@ LLAMA_DIR="/opt/llama.cpp"
 MODEL_DIR="/opt/models"
 ENV_FILE="/etc/llama-server.env"
 SERVICE_FILE="/etc/systemd/system/llama-server.service"
-PORT=8080
+PORT=8000
 
 REBUILD=false
 for arg in "$@"; do
@@ -235,7 +235,7 @@ PRESENCE_PENALTY=1.5
 MIN_P=0.0
 
 # Server port (Tailscale serve maps this to HTTPS)
-PORT=8080
+PORT=8000
 
 # HuggingFace token (required for model downloads — keep this file root-only)
 HF_TOKEN=your_token_here
@@ -302,7 +302,7 @@ echo "       sudo systemctl start llama-server"
 echo "       sudo systemctl status llama-server"
 echo ""
 echo "  4. Verify it's serving the MTP model and metrics:"
-echo "       curl http://localhost:8080/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp"
-echo "       curl http://localhost:8080/metrics | head -20"
+echo "       curl http://localhost:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp"
+echo "       curl http://localhost:8000/metrics | head -20"
 echo ""
 echo "  Logs: sudo journalctl -u llama-server -f"
