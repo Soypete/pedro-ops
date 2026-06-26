@@ -12,8 +12,14 @@
 #
 # Router/--models-preset mode is retired; the INI in presets/ is a rollback artifact only.
 #
+# NOTE: this uses `ssh -tt` to force a PTY so sudo can prompt for your password.
+# Run it from a real interactive terminal (not a non-interactive wrapper/CI), or it
+# will fail with "a terminal is required to read the password". To make it fully
+# non-interactive, add a passwordless-sudo rule on pedrogpt for the install/systemctl/
+# tee/rm commands below (/etc/sudoers.d/llama-deploy) and switch `ssh -tt` to `ssh`.
+#
 # Prerequisites:
-#   - SSH access to pedrogpt via Tailscale (ssh pedrogpt)
+#   - SSH access to pedrogpt via Tailscale (ssh pedrogpt), from an interactive terminal
 #   - llama-server already built at /opt/llama.cpp/build/bin/llama-server
 #
 # Usage:
@@ -70,8 +76,8 @@ if [[ "$RESTART_ONLY" == "false" ]]; then
   scp "$ENV_FILE" "$REMOTE_HOST:/tmp/llama-server.env"
 
   # Install wrapper + env, retire the router drop-in, and pin ExecStart to the wrapper.
-  echo "--- Installing on $REMOTE_HOST (sudo) ---"
-  ssh -t "$REMOTE_HOST" "sudo install -m 0755 /tmp/run-server.sh $REMOTE_WRAPPER \
+  echo "--- Installing on $REMOTE_HOST (sudo — you'll be prompted for your password) ---"
+  ssh -tt "$REMOTE_HOST" "sudo install -m 0755 /tmp/run-server.sh $REMOTE_WRAPPER \
     && sudo install -m 0600 /tmp/llama-server.env $REMOTE_ENV_FILE \
     && sudo rm -f /etc/systemd/system/${SERVICE_NAME}.service.d/preset.conf \
     && sudo rmdir /etc/systemd/system/${SERVICE_NAME}.service.d 2>/dev/null || true \
@@ -101,10 +107,10 @@ fi
 # Restart and health-check
 # ---------------------------------------------------------------------------
 echo "--- Restarting $SERVICE_NAME ---"
-ssh -t "$REMOTE_HOST" "sudo systemctl daemon-reload && sudo systemctl restart $SERVICE_NAME"
+ssh -tt "$REMOTE_HOST" "sudo systemctl daemon-reload && sudo systemctl restart $SERVICE_NAME"
 sleep 5
 
-if ssh -t "$REMOTE_HOST" "sudo systemctl is-active --quiet $SERVICE_NAME"; then
+if ssh -tt "$REMOTE_HOST" "sudo systemctl is-active --quiet $SERVICE_NAME"; then
   echo ""
   echo "=== $SERVICE_NAME active on $REMOTE_HOST ==="
   echo "Health:  curl http://$REMOTE_HOST:8080/health"
@@ -112,7 +118,7 @@ if ssh -t "$REMOTE_HOST" "sudo systemctl is-active --quiet $SERVICE_NAME"; then
   echo "Logs:    ssh $REMOTE_HOST sudo journalctl -u $SERVICE_NAME -f"
 else
   echo "ERROR: $SERVICE_NAME failed to start"
-  ssh -t "$REMOTE_HOST" "sudo journalctl -u $SERVICE_NAME -n 40"
+  ssh -tt "$REMOTE_HOST" "sudo journalctl -u $SERVICE_NAME -n 40"
   exit 1
 fi
 
