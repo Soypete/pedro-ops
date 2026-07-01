@@ -496,6 +496,71 @@ When setting up a new cluster, ensure Longhorn is configured to use the mounted 
 - Edit the Longhorn StorageClass or node disk configuration before deploying workloads
 - Verify disk configuration with `kubectl get nodes.longhorn.io -o json | jq '.status.diskStatus'`
 
+### Prometheus CrashLoopBackOff — "no space left on device"
+
+**Symptoms:**
+- `prometheus-kube-prometheus-stack-prometheus-0` in `CrashLoopBackOff` with a very high restart count.
+- Container log ends with:
+  `Error running goroutines from run.Group err="opening storage failed: open /prometheus/wal/00001713: no space left on device"`
+
+**Root cause (as seen 2026-07-01):**
+The Prometheus PVC was bound at only **10Gi**, while the Prometheus CR was configured with `retentionSize: 160GB` and `storage: 200Gi`. Two compounding problems:
+1. Editing `spec.storage` on the Prometheus CR does **not** resize an existing PVC — the StatefulSet `volumeClaimTemplate` is immutable, so the 200Gi request never took effect and the volume stayed 10Gi.
+2. `retentionSize` (160GB) was far larger than the actual disk (10Gi), so Prometheus never pruned and filled the volume until it crashed.
+3. The volume's Longhorn replica had also landed on the **small `/var/lib/longhorn` default disk (105GB)** on `refurb`, not the **1.6TB `data-disk` (`/data/persistent-storage`)** — so even a resize couldn't reach 200Gi. (Longhorn's default disk was still schedulable and untagged; see "Longhorn Using Wrong Disk" above.)
+
+**Diagnosis:**
+```bash
+export KUBECONFIG=~/.foundry/kubeconfig
+kubectl config use-context default
+
+# Confirm the crash reason
+kubectl logs prometheus-kube-prometheus-stack-prometheus-0 -n monitoring -c prometheus --tail=5
+
+# Compare CR intent vs actual PVC size (the mismatch is the bug)
+kubectl get prometheus -n monitoring \
+  -o jsonpath='retention={.items[0].spec.retention} retentionSize={.items[0].spec.retentionSize} storage={.items[0].spec.storage.volumeClaimTemplate.spec.resources.requests.storage}{"\n"}'
+kubectl get pvc -n monitoring \
+  prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0 \
+  -o jsonpath='request={.spec.resources.requests.storage} capacity={.status.capacity.storage}{"\n"}'
+
+# Which Longhorn disk is the replica on? (442d3905… = 1.6TB data-disk, 14e39fb2… = small default disk)
+VOL=$(kubectl get pvc -n monitoring prometheus-...-prometheus-0 -o jsonpath='{.spec.volumeName}')
+kubectl get replicas.longhorn.io -n longhorn-system -l longhornvolume=$VOL \
+  -o jsonpath='{.items[0].spec.nodeID} {.items[0].spec.diskID}{"\n"}'
+```
+
+**Fix (recreate the volume empty on the 2TB data-disk):**
+An in-place resize/replica-migrate fails here: the rebuild can't sync while Prometheus crash-loops (attached), and Longhorn discards the incomplete replica when the volume detaches. Because the TSDB was already full/corrupt, the clean fix is to recreate the volume empty on the big disk. **This loses existing metric history.**
+```bash
+# 1. Steer new volumes to the 2TB disk: disable scheduling on refurb's small default disk
+kubectl patch nodes.longhorn.io refurb -n longhorn-system --type=merge \
+  -p '{"spec":{"disks":{"default-disk-<uuid>":{"allowScheduling":false,"path":"/var/lib/longhorn"}}}}'
+
+# 2. Make sure the Prometheus CR requests the size you want (200Gi here) and a sane retentionSize (<= disk)
+kubectl patch prometheus kube-prometheus-stack-prometheus -n monitoring --type=merge \
+  -p '{"spec":{"retentionSize":"160GB"}}'   # storage was already 200Gi
+
+# 3. Scale Prometheus to 0 (detach the volume)
+kubectl patch prometheus kube-prometheus-stack-prometheus -n monitoring --type=merge -p '{"spec":{"replicas":0}}'
+# wait until the pod is gone and the Longhorn volume shows state=detached
+
+# 4. Delete the old PVC (Delete reclaim policy removes the PV + Longhorn volume too)
+kubectl delete pvc -n monitoring \
+  prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0
+
+# 5. Scale back to 1 — the operator recreates a fresh 200Gi PVC, which lands on the
+#    only schedulable disk (the 1.6TB data-disk).
+kubectl patch prometheus kube-prometheus-stack-prometheus -n monitoring --type=merge -p '{"spec":{"replicas":1}}'
+
+# 6. Verify: pod 2/2 Running with 0 restarts, volume 200Gi healthy on disk 442d3905… (refurb data-disk)
+kubectl get pod prometheus-kube-prometheus-stack-prometheus-0 -n monitoring
+```
+
+**Notes / gotchas:**
+- If you try a replica-migrate instead, note Longhorn `replica-soft-anti-affinity` defaults to `false` (hard) — it won't place two replicas of one volume on the same node, so you can't build a second replica on refurb while one already lives there. If you temporarily flip it to `true`, **set it back to `false`** afterwards.
+- After this fix, refurb's small `/var/lib/longhorn` disk is left `allowScheduling=false` on purpose so all Longhorn volumes use the 2TB `data-disk`. See `docs/storage-setup.md`.
+
 ## Monitoring and Observability
 
 ### Grafana Not Accessible

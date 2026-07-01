@@ -103,13 +103,29 @@ components:
     replicas: 2
 ```
 
+### Disk scheduling (important)
+
+Each node exposes **two** Longhorn disks, and only the big one should be used:
+
+| Node | Disk | Path | Size | `allowScheduling` |
+|------|------|------|------|-------------------|
+| refurb (worker-1, 100.70.90.12) | `data-disk` (UUID `442d3905…`) | `/data/persistent-storage` | 1.6TB | **true** |
+| refurb | `default-disk` (UUID `14e39fb2…`) | `/var/lib/longhorn` | 105GB | **false** (disabled 2026-07-01) |
+| blue1 / blue2 | default-disk | `/var/lib/longhorn` | ~105GB | true (small; avoid large PVCs here) |
+
+The small `/var/lib/longhorn` default disk on **refurb** is intentionally set
+`allowScheduling=false` so large volumes (e.g. the 200Gi Prometheus TSDB) land
+on the 1.6TB `data-disk` instead of filling the 105GB root disk. If a workload's
+Longhorn replica ends up on a small disk and can't grow, see
+`docs/troubleshooting.md` → "Prometheus CrashLoopBackOff" / "Longhorn Using Wrong Disk".
+
 ## Storage Allocation
 
-Current allocations from the 1.5TB volume:
+Current allocations from the 1.5TB `data-disk`:
 
 - **Longhorn**: Dynamic allocation (default storage class)
   - OpenBAO: File-based storage backend
-  - Prometheus: 15-day retention
+  - Prometheus: **200Gi PVC, `retentionSize: 160GB`, 15-day retention** (single replica on refurb `data-disk`; recreated 2026-07-01 to escape a full 10Gi volume)
   - Loki: 7-day retention
   - Grafana: Configuration and dashboards
 - **SeaweedFS**: 500Gi S3-compatible object storage
