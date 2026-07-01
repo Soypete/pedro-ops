@@ -561,6 +561,56 @@ kubectl get pod prometheus-kube-prometheus-stack-prometheus-0 -n monitoring
 - If you try a replica-migrate instead, note Longhorn `replica-soft-anti-affinity` defaults to `false` (hard) — it won't place two replicas of one volume on the same node, so you can't build a second replica on refurb while one already lives there. If you temporarily flip it to `true`, **set it back to `false`** afterwards.
 - After this fix, refurb's small `/var/lib/longhorn` disk is left `allowScheduling=false` on purpose so all Longhorn volumes use the 2TB `data-disk`. See `docs/storage-setup.md`.
 
+### Loki stuck in ContainerCreating — "PersistentVolume is marked for deletion"
+
+**Symptoms:**
+- `loki-0` stuck `Pending`/`ContainerCreating` for a very long time (seen 41 days).
+- Events show `FailedAttachVolume ... PersistentVolume "pvc-…" is marked for deletion` repeating thousands of times.
+
+**Root cause (2026-07-01):**
+The Loki PV **and** its PVC (`storage-loki-0`) both had a `deletionTimestamp` set (a delete was started ~2026-05-19) but were stuck on finalizers, while the underlying Longhorn volume had **already been deleted**. So the pod kept trying to attach a volume whose backing storage no longer existed. No data to preserve.
+
+**Fix (clear the half-deleted PV/PVC, let Loki reprovision):**
+```bash
+export KUBECONFIG=~/.foundry/kubeconfig; kubectl config use-context default
+PV=$(kubectl get pvc storage-loki-0 -n monitoring -o jsonpath='{.spec.volumeName}')
+
+# Remove the stuck finalizers so the pending deletions complete
+kubectl patch pv $PV --type=merge -p '{"metadata":{"finalizers":null}}'
+kubectl patch pvc storage-loki-0 -n monitoring --type=merge -p '{"metadata":{"finalizers":null}}'
+
+# Delete the stuck pod so the StatefulSet reprovisions a fresh PVC
+kubectl delete pod loki-0 -n monitoring
+```
+
+**Then: "NoSuchBucket" from the compactor.**
+Once the volume was fixed, `loki-0` crash-looped with:
+`init compactor: failed to init delete store: failed to get s3 object: NoSuchBucket: The specified bucket does not exist`.
+Loki stores chunks/index in a SeaweedFS S3 bucket named `loki` (per `stack.yaml`), and **the bucket didn't exist**. SeaweedFS returns `NoSuchBucket` (not `NoSuchKey`) on a GetObject against an empty/missing path, which Loki's compactor treats as fatal.
+
+Create the bucket, then restart until it populates:
+```bash
+# List buckets / create the loki bucket via weed shell in the filer pod
+kubectl exec -n seaweedfs seaweedfs-filer-0 -- sh -c 'echo "s3.bucket.list" | weed shell'
+kubectl exec -n seaweedfs seaweedfs-filer-0 -- sh -c 'echo "s3.bucket.create -name loki" | weed shell'
+
+# Restart loki-0. The first start populates index/ + delete_requests/ in the bucket;
+# once populated, the compactor's GetObject no longer 404s and loki-0 goes 2/2 Ready.
+kubectl delete pod loki-0 -n monitoring
+```
+Note: the `velero` bucket is likewise absent in SeaweedFS (only `kitaru-artifacts` + `loki` exist as of this fix) — velero backups will fail until it's created the same way.
+
+### Duplicate Grafana (two Helm releases)
+
+**Symptom:** Grafana deployed twice — one in `monitoring` (Helm release `grafana`, has the `grafana.local` Contour ingress, matches `stack.yaml`) and a stray one in its own `grafana` namespace (Helm release `grafana`, revision 1, **no ingress**).
+
+**Fix (keep monitoring/grafana, remove the stray):**
+```bash
+helm uninstall grafana -n grafana        # removes the stray release
+kubectl delete namespace grafana         # namespace was otherwise empty (no leftover PVCs)
+```
+The keeper (`monitoring/grafana`, with the ingress) is untouched.
+
 ## Monitoring and Observability
 
 ### Grafana Not Accessible
