@@ -611,6 +611,64 @@ kubectl delete namespace grafana         # namespace was otherwise empty (no lef
 ```
 The keeper (`monitoring/grafana`, with the ingress) is untouched.
 
+### Velero backups silently failing — no BackupStorageLocation
+
+**Symptom:**
+- The daily backup schedule (`velero-daily-backup`, `0 2 * * *`) shows a recent `lastBackup` time, but **no backups ever succeed**.
+- `kubectl get backups.velero.io -n velero` shows a large pile of backups all in `FailedValidation` (136 of them as of 2026-07-01, going back months).
+- Velero pod logs spam: `error getting backup storage location: BackupStorageLocation.velero.io "default" not found`.
+
+**Root cause (2026-07-01):**
+Two independent gaps meant velero had produced **zero successful backups in 136 days**:
+1. The `BackupStorageLocation` named `default` (which `--default-backup-storage-location=default` expects) **did not exist**. Every scheduled backup failed validation instantly.
+2. The SeaweedFS `velero` bucket also didn't exist (only `kitaru-artifacts` + `loki` did).
+
+Note: `kubectl get backup ...` resolves to the **Longhorn** `backups` CRD, not velero's — always use `kubectl get backups.velero.io` for velero backups.
+
+**Fix:**
+```bash
+export KUBECONFIG=~/.foundry/kubeconfig; kubectl config use-context default
+
+# 1. Create the velero bucket in SeaweedFS
+kubectl exec -n seaweedfs seaweedfs-filer-0 -- sh -c 'echo "s3.bucket.create -name velero" | weed shell'
+
+# 2. Create the default BackupStorageLocation (creds come from the existing
+#    'velero' secret's 'cloud' key; endpoint is the in-cluster SeaweedFS S3 svc)
+kubectl apply -f - <<'EOF'
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: default
+  namespace: velero
+spec:
+  provider: aws
+  objectStorage:
+    bucket: velero
+  credential:
+    name: velero
+    key: cloud
+  config:
+    region: us-east-1
+    s3ForcePathStyle: "true"
+    s3Url: http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333
+  default: true
+EOF
+
+# 3. Verify it validates + a test backup completes
+kubectl get backupstoragelocation default -n velero -o jsonpath='{.status.phase}{"\n"}'  # -> Available
+kubectl apply -f - <<'EOF'
+apiVersion: velero.io/v1
+kind: Backup
+metadata: {name: test-backup-bsl-check, namespace: velero}
+spec: {includedNamespaces: [velero], storageLocation: default, ttl: 24h0m0s}
+EOF
+kubectl get backups.velero.io test-backup-bsl-check -n velero -o jsonpath='{.status.phase}{"\n"}'  # -> Completed
+
+# 4. Clean up the pile of old FailedValidation backups
+kubectl delete backups.velero.io -n velero \
+  $(kubectl get backups.velero.io -n velero -o jsonpath='{range .items[?(@.status.phase=="FailedValidation")]}{.metadata.name} {end}')
+```
+
 ## Monitoring and Observability
 
 ### Grafana Not Accessible
