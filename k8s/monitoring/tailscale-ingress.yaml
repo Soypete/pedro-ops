@@ -1,0 +1,36 @@
+# Tailscale ingresses that expose Grafana and Prometheus on the tailnet
+# (e.g. https://monitoring-grafana-ingress.<tailnet>.ts.net), mirroring the
+# existing Loki tailscale ingress. Reachable over Tailscale, unlike the
+# *.local Contour ingresses which only resolve on the LAN.
+#
+# Apply: kubectl apply -f k8s/monitoring/tailscale-ingress.yaml
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ts
+  namespace: monitoring
+  annotations:
+    tailscale.com/hostname: grafana
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: grafana
+      port:
+        number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prometheus-ts
+  namespace: monitoring
+  annotations:
+    tailscale.com/hostname: prometheus
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: kube-prometheus-stack-prometheus
+      port:
+        number: 9090

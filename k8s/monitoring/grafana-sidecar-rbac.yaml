@@ -1,0 +1,35 @@
+# The Grafana dashboard/datasource sidecars are configured to watch ConfigMaps
+# and Secrets across ALL namespaces (NAMESPACE=ALL), but the grafana
+# ServiceAccount only ships with a namespace-scoped RoleBinding in `monitoring`.
+# The cluster-wide watch therefore 403s and NO ConfigMap-provisioned dashboards
+# load. This grants the minimal cluster-scoped read/watch the sidecar needs.
+#
+# Apply: kubectl apply -f k8s/monitoring/grafana-sidecar-rbac.yaml
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: grafana-sidecar-watch
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/part-of: kube-prometheus-stack
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: grafana-sidecar-watch
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/part-of: kube-prometheus-stack
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: grafana-sidecar-watch
+subjects:
+  - kind: ServiceAccount
+    name: grafana
+    namespace: monitoring
