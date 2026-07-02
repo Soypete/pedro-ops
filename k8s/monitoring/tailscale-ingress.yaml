@@ -1,7 +1,13 @@
 # Tailscale ingresses that expose Grafana and Prometheus on the tailnet
-# (e.g. https://monitoring-grafana-ingress.<tailnet>.ts.net), mirroring the
+# (https://monitoring-<name>-ts-ingress.<tailnet>.ts.net), mirroring the
 # existing Loki tailscale ingress. Reachable over Tailscale, unlike the
 # *.local Contour ingresses which only resolve on the LAN.
+#
+# NOTE: the `tls:` block is REQUIRED. Without it the Tailscale operator sets up
+# an HTTP-only proxy that expects the backend on 127.0.0.1:80, producing
+# "could not connect to local backend server at 127.0.0.1:80" / ERR_CONNECTION_REFUSED
+# for any backend not on port 80. With tls, the operator serves HTTPS and proxies
+# to the real service port.
 #
 # Apply: kubectl apply -f k8s/monitoring/tailscale-ingress.yaml
 ---
@@ -19,6 +25,9 @@ spec:
       name: grafana
       port:
         number: 80
+  tls:
+    - hosts:
+        - grafana
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -33,9 +42,9 @@ spec:
     service:
       name: kube-prometheus-stack-prometheus
       # Reference the port BY NAME: this service is multi-port
-      # (http-web:9090 + reloader-web:8080), and the Tailscale operator's
-      # port resolution falls back to :80 when given a bare number on a
-      # multi-port service — which is why the proxy logged
-      # "could not connect to local backend server at 127.0.0.1:80".
+      # (http-web:9090 + reloader-web:8080).
       port:
         name: http-web
+  tls:
+    - hosts:
+        - prometheus
