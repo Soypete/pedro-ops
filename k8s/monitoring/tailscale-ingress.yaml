@@ -32,5 +32,10 @@ spec:
   defaultBackend:
     service:
       name: kube-prometheus-stack-prometheus
+      # Reference the port BY NAME: this service is multi-port
+      # (http-web:9090 + reloader-web:8080), and the Tailscale operator's
+      # port resolution falls back to :80 when given a bare number on a
+      # multi-port service — which is why the proxy logged
+      # "could not connect to local backend server at 127.0.0.1:80".
       port:
-        number: 9090
+        name: http-web
