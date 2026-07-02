@@ -48,3 +48,25 @@ spec:
   tls:
     - hosts:
         - prometheus
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  # Replaces the older `loki` ingress (which lacked a tls block and so got the
+  # long monitoring-loki-ingress.<tailnet>.ts.net name). This gives the clean
+  # loki.<tailnet>.ts.net. You rarely hit Loki directly — Grafana queries it —
+  # but this is handy for API/LogCLI access over the tailnet.
+  name: loki-ts
+  namespace: monitoring
+  annotations:
+    tailscale.com/hostname: loki
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: loki-gateway
+      port:
+        number: 80
+  tls:
+    - hosts:
+        - loki
