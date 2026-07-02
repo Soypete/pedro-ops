@@ -1,0 +1,92 @@
+# Values for the `grafana` Helm release in the `monitoring` namespace
+# (chart: grafana, release rev captured 2026-07-02).
+#
+# Change from the previously-deployed values: the `dashboards.default` block
+# (gnetId 15520 kubernetes-cluster + 1860 node-exporter) has been REMOVED. Those
+# gnetId downloads run in an init container that tries to reach grafana.com,
+# which this cluster can't do, so it produced empty 0-byte dashboard files and
+# a steady stream of `failed to load dashboard ... EOF` provisioning errors.
+# The two dashboards are now shipped as ConfigMaps instead
+# (see dashboards/kubernetes-cluster.json, dashboards/node-exporter.json).
+#
+# Apply:
+#   helm upgrade grafana grafana/grafana -n monitoring -f k8s/monitoring/grafana-values.yaml
+adminPassword: ""
+adminUser: admin
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+    - disableDeletion: false
+      editable: true
+      folder: ""
+      name: default
+      options:
+        path: /var/lib/grafana/dashboards/default
+      orgId: 1
+      type: file
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+    - access: proxy
+      editable: true
+      isDefault: true
+      name: Prometheus
+      type: prometheus
+      url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+    - access: proxy
+      editable: true
+      jsonData:
+        maxLines: 1000
+      name: Loki
+      type: loki
+      url: http://loki-gateway.monitoring.svc.cluster.local:80
+deploymentStrategy:
+  type: Recreate
+grafana.ini:
+  analytics:
+    check_for_updates: false
+    reporting_enabled: false
+  security:
+    disable_gravatar: true
+  server:
+    root_url: https://grafana.local
+  users:
+    allow_sign_up: false
+ingress:
+  annotations:
+    cert-manager.io/cluster-issuer: foundry-ca-issuer
+  enabled: true
+  hosts:
+  - grafana.local
+  ingressClassName: contour
+  tls:
+  - hosts:
+    - grafana.local
+    secretName: grafana-tls
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: longhorn
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+service:
+  port: 80
+  type: ClusterIP
+serviceMonitor:
+  enabled: true
+sidecar:
+  dashboards:
+    enabled: true
+    folderAnnotation: grafana_folder
+    label: grafana_dashboard
+    labelValue: "1"
+    searchNamespace: ALL
+  datasources:
+    enabled: true
+    label: grafana_datasource
+    labelValue: "1"
+    searchNamespace: ALL
