@@ -2,18 +2,19 @@
 
 # Setup llama.cpp on Ubuntu (pedrogpt) with CUDA support.
 # Builds llama-server and installs it as a systemd service that
-# exposes Prometheus metrics at :8080/metrics.
+# exposes Prometheus metrics at :8000/metrics.
 #
 # Usage: ./setup-llama-cpp-ubuntu.sh [--rebuild]
 #   --rebuild  Force a clean rebuild even if llama.cpp is already installed
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LLAMA_DIR="/opt/llama.cpp"
 MODEL_DIR="/opt/models"
 ENV_FILE="/etc/llama-server.env"
 SERVICE_FILE="/etc/systemd/system/llama-server.service"
-PORT=8080
+PORT=8000
 
 REBUILD=false
 for arg in "$@"; do
@@ -66,7 +67,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# CUDA check — RTX 5090 (Blackwell, sm_89) requires CUDA 12.8+
+# CUDA check — RTX 5090 (Blackwell, sm_120) requires CUDA 12.8.
+# Use CUDA 12.8 specifically — NOT CUDA 13.x: its MMQ (matrix-multiply-quantized)
+# kernels crash on Blackwell and force a slow cuBLAS fallback (~5-6x slower).
 # DO NOT use apt install nvidia-cuda-toolkit — it ships an old version.
 # Install from NVIDIA's official repo:
 #
@@ -74,7 +77,7 @@ fi
 #   sudo dpkg -i cuda-keyring_1.1-1_all.deb
 #   sudo apt-get update
 #   sudo apt-get install -y cuda-toolkit-12-8
-#   echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
+#   echo 'export PATH=/usr/local/cuda-12.8/bin:$PATH' >> ~/.bashrc
 #   source ~/.bashrc
 #
 # Then re-run this script.
@@ -100,11 +103,11 @@ else
   CUDA_MINOR=$(echo "$CUDA_VERSION" | cut -d. -f2)
   echo "CUDA $CUDA_VERSION detected"
 
-  # RTX 5090 (Blackwell sm_89) requires CUDA 12.8+
+  # RTX 5090 (Blackwell sm_120) requires CUDA 12.8.
   if [[ "$CUDA_MAJOR" -lt 12 ]] || [[ "$CUDA_MAJOR" -eq 12 && "$CUDA_MINOR" -lt 8 ]]; then
     echo ""
     echo "ERROR: CUDA $CUDA_VERSION is too old for RTX 5090 (Blackwell)."
-    echo "Blackwell (sm_89) requires CUDA 12.8 or newer."
+    echo "Blackwell (sm_120) requires CUDA 12.8."
     echo ""
     echo "Upgrade:"
     echo "  sudo apt-get install -y cuda-toolkit-12-8"
@@ -114,9 +117,17 @@ else
     exit 1
   fi
 
-  echo "CUDA $CUDA_VERSION OK — building with GGML_CUDA=ON, sm_89 (RTX 5090 Blackwell)"
+  # CUDA 13.x: MMQ kernels crash on Blackwell and fall back to slow cuBLAS. Warn but continue.
+  if [[ "$CUDA_MAJOR" -ge 13 ]]; then
+    echo ""
+    echo "WARNING: CUDA $CUDA_VERSION (13.x) is known to crash the MMQ kernels on Blackwell"
+    echo "and silently fall back to cuBLAS — measured ~5-6x slower. Use CUDA 12.8 for the 5090."
+    echo ""
+  fi
+
+  echo "CUDA $CUDA_VERSION OK — building with GGML_CUDA=ON, sm_120 (RTX 5090 Blackwell)"
   CUDA_FLAG="-DGGML_CUDA=ON"
-  CUDA_ARCH_FLAG="-DCMAKE_CUDA_ARCHITECTURES=89"
+  CUDA_ARCH_FLAG="-DCMAKE_CUDA_ARCHITECTURES=120"
 fi
 
 # ---------------------------------------------------------------------------
@@ -138,13 +149,25 @@ fi
 echo "--- Building llama.cpp (this takes a few minutes) ---"
 cd "$LLAMA_DIR"
 
+# Remove any stale build dir so cached CMake vars (e.g. a previously-forced
+# cuBLAS, or an old CUDA arch) can't leak into this build.
+sudo rm -rf build
+
 sudo cmake -B build \
   ${CUDA_FLAG} \
   ${CUDA_ARCH_FLAG} \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc \
+  -DGGML_CUDA_FORCE_CUBLAS=OFF \
+  -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLAMA_SERVER_VERBOSE=OFF
 
 sudo cmake --build build --config Release -j "$(nproc)"
+
+# Sanity check: cuBLAS must NOT be forced on, or the fast MMQ path is bypassed.
+if grep -q 'GGML_CUDA_FORCE_CUBLAS:.*=ON' "$LLAMA_DIR/build/CMakeCache.txt" 2>/dev/null; then
+  echo "WARNING: GGML_CUDA_FORCE_CUBLAS is ON in the build cache — expect slow inference."
+fi
 
 echo "--- Build complete ---"
 ls -lh "$LLAMA_DIR/build/bin/"
@@ -162,129 +185,83 @@ echo "Use ./switch-model.sh to download and activate a model."
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "--- Creating $ENV_FILE ---"
   sudo tee "$ENV_FILE" > /dev/null <<'EOF'
-# llama-server runtime configuration
+# llama-server runtime configuration — dedicated Qwen3.6-27B MTP single-model server.
 # Edit this file then: sudo systemctl restart llama-server
-# Switch models with: ./switch-model.sh <hf-repo> <hf-file>
+#
+# This box runs ONE tuned model with Multi-Token Prediction (MTP) self-speculative
+# decoding. MTP requires a single stream (N_PARALLEL=1) — it cannot share VRAM with
+# multi-slot continuous batching. Router/preset mode is retired (kept as rollback only).
 
-# HuggingFace repo and file (llama-server downloads and caches automatically)
-HF_REPO=unsloth/GLM-4.7-Flash-GGUF
-HF_FILE=GLM-4.7-Flash-UD-Q6_K_XL-00001-of-00002.gguf
+# Local GGUF path (downloaded by switch-model.sh / hf download). The MTP head is baked
+# into this checkpoint, so no separate draft model is needed.
+MODEL=/opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-UD-Q4_K_XL.gguf
+
+# API model id advertised at /v1/models and required in request "model" fields.
+MODEL_ALIAS=qwen3.6-27b-mtp
 
 # HuggingFace cache directory (on the 2TB drive)
 HF_HOME=/opt/models/cache
 
-# GPU layers (-1 = all layers on GPU)
+# GPU layers (-1 = all layers on GPU; the dense 27B fits fully in 32GB VRAM)
 N_GPU_LAYERS=-1
 
-# Context window size (tokens)
-N_CTX=8192
+# Context window (tokens). 216064 fits alongside Q4 weights + MTP head + q8_0 KV cache —
+# Qwen3.6's hybrid DeltaNet/GQA layout keeps the KV cache small even at 200k+.
+N_CTX=216064
 
-# Number of parallel request slots
-N_PARALLEL=4
+# Parallel request slots — MUST be 1 for MTP.
+N_PARALLEL=1
+
+# Batch sizes: -b logical token budget, -ub physical micro-batch shipped to the GPU.
+# Larger UBATCH improves prompt-processing (prefill) throughput; 1024 is safe on a 5090.
+BATCH=2048
+UBATCH=1024
+
+# MTP self-speculative decoding. SPEC_DRAFT_N = max draft tokens per step.
+# Confirm the exact spec-type spelling for your build: llama-server --help | grep -i spec
+SPEC_TYPE=draft-mtp
+SPEC_DRAFT_N=2
+
+# KV cache quantization (q8_0 halves KV VRAM at negligible quality cost). Requires flash-attn.
+# K and V MUST match or llama.cpp silently falls back to the slow attention path.
+CACHE_TYPE_K=q8_0
+CACHE_TYPE_V=q8_0
+
+# Sampling (Unsloth non-thinking recommendation for Qwen3.6).
+TEMP=0.7
+TOP_K=20
+TOP_P=0.8
+PRESENCE_PENALTY=1.5
+MIN_P=0.0
 
 # Server port (Tailscale serve maps this to HTTPS)
-PORT=8080
+PORT=8000
 
 # HuggingFace token (required for model downloads — keep this file root-only)
 HF_TOKEN=your_token_here
-
-# MoE expert layer offload pattern (set by switch-model.sh for MoE models).
-# Keeps expert weight tensors in 64GB RAM instead of VRAM — required for
-# models like GLM-4.7-Flash, Qwen3-Next-80B, and Nemotron-120B to avoid OOM on 32GB VRAM.
-OVERRIDE_TENSOR=.ffn_.*_exps.=CPU
-
-# Flash attention (set by switch-model.sh for MoE models).
-# Reduces KV cache VRAM usage — required alongside OVERRIDE_TENSOR for large
-# MoE models (GLM-4.7-Flash, Nemotron-120B, Qwen3-Next-80B) to avoid OOM on 32GB VRAM.
-FLASH_ATTN=1
 EOF
   echo "Edit $ENV_FILE before starting the service."
 else
   echo "--- $ENV_FILE already exists, skipping ---"
-  # Add OVERRIDE_TENSOR to existing env file if missing
-  if ! grep -q "^OVERRIDE_TENSOR" "$ENV_FILE"; then
-    echo "" | sudo tee -a "$ENV_FILE" > /dev/null
-    echo "# MoE expert layer offload — set by switch-model.sh for MoE models, leave empty for dense" | sudo tee -a "$ENV_FILE" > /dev/null
-    echo "OVERRIDE_TENSOR=" | sudo tee -a "$ENV_FILE" > /dev/null
-    echo "Added OVERRIDE_TENSOR to existing $ENV_FILE"
-  fi
-  # Add FLASH_ATTN to existing env file if missing
-  if ! grep -q "^FLASH_ATTN" "$ENV_FILE"; then
-    echo "" | sudo tee -a "$ENV_FILE" > /dev/null
-    echo "# Flash attention — set by switch-model.sh for MoE models, leave empty for dense" | sudo tee -a "$ENV_FILE" > /dev/null
-    echo "FLASH_ATTN=" | sudo tee -a "$ENV_FILE" > /dev/null
-    echo "Added FLASH_ATTN to existing $ENV_FILE"
-  fi
+  echo "    (single-model MTP mode reads MODEL/MODEL_ALIAS/SPEC_TYPE etc. — see the template above"
+  echo "     if upgrading from router/MoE mode, replace the old env file)"
 fi
 
 # ---------------------------------------------------------------------------
-# Wrapper script — handles optional --override-tensor for MoE models.
-# Systemd ExecStart can't do conditional args, so we use a launcher script.
+# Wrapper script — launches the dedicated Qwen3.6-27B MTP single-model server.
+# Installed from the committed run-server.sh (single source of truth, also used
+# by deploy-presets.sh). Reads /etc/llama-server.env.
 # ---------------------------------------------------------------------------
 WRAPPER="$LLAMA_DIR/run-server.sh"
 echo "--- Installing launcher wrapper $WRAPPER ---"
-sudo tee "$WRAPPER" > /dev/null <<'WRAPPER_EOF'
-#!/bin/bash
-# llama-server launcher — reads /etc/llama-server.env and starts the server.
-# Called by the llama-server systemd service.
-set -euo pipefail
-
-ENV_FILE="/etc/llama-server.env"
-# shellcheck source=/etc/llama-server.env
-source "$ENV_FILE"
-
-export HF_HOME="${HF_HOME:-/opt/models/cache}"
-export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}"
-
-EXTRA_ARGS=()
-if [[ -n "${OVERRIDE_TENSOR:-}" ]]; then
-  EXTRA_ARGS+=(--override-tensor "${OVERRIDE_TENSOR}")
-fi
-if [[ "${FLASH_ATTN:-}" == "1" ]]; then
-  EXTRA_ARGS+=(--flash-attn)
-fi
-
-exec /opt/llama.cpp/build/bin/llama-server \
-    --host 0.0.0.0 \
-    --port "${PORT:-8080}" \
-    --hf-repo "${HF_REPO}" \
-    --hf-file "${HF_FILE}" \
-    --ctx-size "${N_CTX:-8192}" \
-    --n-gpu-layers "${N_GPU_LAYERS:--1}" \
-    --parallel "${N_PARALLEL:-4}" \
-    --jinja \
-    --no-webui \
-    --metrics \
-    --embeddings \
-    --pooling mean \
-    "${EXTRA_ARGS[@]}"
-WRAPPER_EOF
+sudo cp "$SCRIPT_DIR/run-server.sh" "$WRAPPER"
 sudo chmod +x "$WRAPPER"
 
 # ---------------------------------------------------------------------------
 # Systemd service
 # ---------------------------------------------------------------------------
-echo "--- Installing systemd service ---"
-sudo tee "$SERVICE_FILE" > /dev/null <<EOF
-[Unit]
-Description=llama.cpp Server
-Documentation=https://github.com/ggml-org/llama.cpp
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=$LLAMA_DIR/run-server.sh
-Restart=on-failure
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=llama-server
-SupplementaryGroups=render video
-
-[Install]
-WantedBy=multi-user.target
-EOF
+echo "--- Installing systemd service (from committed llama-server.service) ---"
+sudo install -m 0644 "$SCRIPT_DIR/llama-server.service" "$SERVICE_FILE"
 
 sudo systemctl daemon-reload
 sudo systemctl enable llama-server
@@ -293,14 +270,20 @@ echo ""
 echo "=== Setup complete ==="
 echo ""
 echo "Next steps:"
-echo "  1. Download all pedro models (~51 GB to /opt/models):"
-echo "       ./switch-model.sh download-all"
+echo "  1. Download the MTP model (~18 GB to /opt/models/qwen3.6-27b-mtp):"
+echo "       hf download unsloth/Qwen3.6-27B-MTP-GGUF --include '*UD-Q4_K_XL*' \\"
+echo "         --local-dir /opt/models/qwen3.6-27b-mtp"
+echo "     Then set MODEL= in $ENV_FILE to the downloaded .gguf path."
 echo ""
-echo "  2. Start the server:"
+echo "  2. Confirm the MTP flag spelling matches this build:"
+echo "       $LLAMA_DIR/build/bin/llama-server --help | grep -i spec"
+echo ""
+echo "  3. Start the server:"
 echo "       sudo systemctl start llama-server"
 echo "       sudo systemctl status llama-server"
 echo ""
-echo "  3. Verify metrics:"
-echo "       curl http://localhost:8080/metrics | head -20"
+echo "  4. Verify it's serving the MTP model and metrics:"
+echo "       curl http://localhost:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp"
+echo "       curl http://localhost:8000/metrics | head -20"
 echo ""
 echo "  Logs: sudo journalctl -u llama-server -f"

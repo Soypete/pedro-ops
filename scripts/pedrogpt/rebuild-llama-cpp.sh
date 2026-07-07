@@ -7,7 +7,7 @@
 # Usage:
 #   ./rebuild-llama-cpp.sh              # Build from this machine via SSH
 #   ./rebuild-llama-cpp.sh --local      # Run directly on pedrogpt
-#   ./rebuild-llama-cpp.sh --arch 89    # Override CUDA architecture (default: auto-detect)
+#   ./rebuild-llama-cpp.sh --arch 120   # Override CUDA arch (default: auto-detect; 5090 = 120)
 
 set -euo pipefail
 
@@ -43,7 +43,7 @@ do_build() {
       arch="$compute"
       echo "Auto-detected CUDA architecture: sm_$arch"
     else
-      echo "ERROR: Cannot detect GPU. Specify --arch manually (e.g., --arch 89)"
+      echo "ERROR: Cannot detect GPU. Specify --arch manually (RTX 5090 = --arch 120)"
       exit 1
     fi
   fi
@@ -63,8 +63,22 @@ do_build() {
 
   echo ""
   echo "--- Building (this may take a few minutes) ---"
-  sudo cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES="$arch"
+  # Clean stale build dir so cached CMake vars (forced cuBLAS, old arch) don't leak.
+  sudo rm -rf build
+  # Pin the CUDA compiler by absolute path — sudo scrubs PATH, so a `which nvcc`
+  # in the user's shell won't be visible to the sudo'd cmake otherwise.
+  sudo cmake -B build \
+    -DGGML_CUDA=ON \
+    -DCMAKE_CUDA_ARCHITECTURES="$arch" \
+    -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc \
+    -DGGML_CUDA_FORCE_CUBLAS=OFF \
+    -DCUDAToolkit_ROOT=/usr/local/cuda-12.8
   sudo cmake --build build --config Release -j"$(nproc)"
+
+  # cuBLAS must not be forced on, or the fast MMQ path is bypassed (~5-6x slower).
+  if grep -q 'GGML_CUDA_FORCE_CUBLAS:.*=ON' "$LLAMA_DIR/build/CMakeCache.txt" 2>/dev/null; then
+    echo "WARNING: GGML_CUDA_FORCE_CUBLAS is ON — expect slow inference on Blackwell."
+  fi
 
   echo ""
   echo "--- Verifying ---"

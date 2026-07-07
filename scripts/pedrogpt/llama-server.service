@@ -1,0 +1,23 @@
+# llama-server systemd unit for pedrogpt (RTX 5090 / Blackwell sm_120).
+#
+# Source of truth for /etc/systemd/system/llama-server.service on pedrogpt —
+# deployed by deploy-presets.sh (scp or taildrop). All launch flags live in
+# /opt/llama.cpp/run-server.sh + /etc/llama-server.env, so this unit rarely
+# changes: edit the env file for tuning, edit run-server.sh for new flags.
+
+[Unit]
+Description=llama.cpp Server (Qwen3.6-27B MTP)
+Documentation=https://github.com/Soypete/pedro-ops
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/llama.cpp/run-server.sh
+Restart=on-failure
+RestartSec=10
+SyslogIdentifier=llama-server
+SupplementaryGroups=render video
+
+[Install]
+WantedBy=multi-user.target

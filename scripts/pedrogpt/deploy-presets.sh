@@ -1,32 +1,44 @@
 #!/bin/bash
 
-# Deploy llama.cpp model presets to pedrogpt and restart the service.
+# Deploy the pedrogpt llama-server config and restart the service.
 #
-# Copies preset INI files to pedrogpt via SCP (over Tailscale) and optionally
-# restarts llama-server with the specified preset.
+# pedrogpt runs a single dedicated Qwen3.6-27B MTP model launched by
+# /opt/llama.cpp/run-server.sh from /etc/llama-server.env. This script:
+#   1. SCPs run-server.sh (the launcher wrapper) to the box
+#   2. SCPs your env file to /etc/llama-server.env (holds secrets — keep out of git)
+#   3. removes any leftover router/--models-preset drop-in
+#   4. installs the committed llama-server.service unit (ExecStart=run-server.sh)
+#   5. daemon-reload + restart, then health-checks
+#
+# Router/--models-preset mode is retired; the INI in presets/ is a rollback artifact only.
+#
+# NOTE: this uses `ssh -tt` to force a PTY so sudo can prompt for your password.
+# Run it from a real interactive terminal (not a non-interactive wrapper/CI), or it
+# will fail with "a terminal is required to read the password". To make it fully
+# non-interactive, add a passwordless-sudo rule on pedrogpt for the install/systemctl/
+# tee/rm commands below (/etc/sudoers.d/llama-deploy) and switch `ssh -tt` to `ssh`.
 #
 # Prerequisites:
-#   - SSH access to pedrogpt via Tailscale (ssh pedrogpt)
-#   - llama-server systemd service installed (setup-llama-cpp.sh)
+#   - SSH access to pedrogpt via Tailscale (ssh pedrogpt), from an interactive terminal
+#   - llama-server already built at /opt/llama.cpp/build/bin/llama-server
 #
 # Usage:
-#   ./deploy-presets.sh                    # Deploy all presets, no restart
-#   ./deploy-presets.sh --preset text      # Deploy + activate text preset
-#   ./deploy-presets.sh --preset code      # Deploy + activate code preset
-#   ./deploy-presets.sh --preset vision    # Deploy + activate vision preset
-#   ./deploy-presets.sh --preset all       # Deploy + activate router (all models)
-#   ./deploy-presets.sh --taildrop         # Use Taildrop instead of SCP
+#   ./deploy-presets.sh --env path/to/llama-server.env   # full deploy (wrapper + env + unit)
+#   ./deploy-presets.sh --restart                         # restart only
+#   ./deploy-presets.sh --taildrop --env <file>           # send files via Taildrop (manual install)
+#   ./deploy-presets.sh --host pedrogpt ...               # override target host
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PRESETS_DIR="$SCRIPT_DIR/presets"
 REMOTE_HOST="pedrogpt"
-REMOTE_PRESETS_DIR="/opt/llama.cpp/presets"
 REMOTE_ENV_FILE="/etc/llama-server.env"
+REMOTE_WRAPPER="/opt/llama.cpp/run-server.sh"
+SERVICE_FILE="/etc/systemd/system/llama-server.service"
 SERVICE_NAME="llama-server"
 
-PRESET=""
+ENV_FILE=""
+RESTART_ONLY=false
 USE_TAILDROP=false
 
 # ---------------------------------------------------------------------------
@@ -34,145 +46,90 @@ USE_TAILDROP=false
 # ---------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --preset)
-      PRESET="$2"
-      shift 2
-      ;;
-    --taildrop)
-      USE_TAILDROP=true
-      shift
-      ;;
-    --host)
-      REMOTE_HOST="$2"
-      shift 2
-      ;;
-    -h|--help)
-      head -17 "$0" | tail -14
-      exit 0
-      ;;
-    *)
-      echo "Unknown option: $1"
-      exit 1
-      ;;
+    --env)      ENV_FILE="$2"; shift 2 ;;
+    --restart)  RESTART_ONLY=true; shift ;;
+    --taildrop) USE_TAILDROP=true; shift ;;
+    --host)     REMOTE_HOST="$2"; shift 2 ;;
+    -h|--help)  head -24 "$0" | tail -21; exit 0 ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
 
-# Validate preset name
-if [[ -n "$PRESET" ]]; then
-  case "$PRESET" in
-    text|vision|tts|all) ;;
-    *)
-      echo "ERROR: Unknown preset '$PRESET'"
-      echo "Valid presets: text, vision, tts, all"
-      exit 1
-      ;;
-  esac
-fi
-
-# Map preset name to INI file
-preset_file() {
-  case "$1" in
-    text)   echo "text.ini" ;;
-    vision) echo "vision.ini" ;;
-    tts)    echo "tts.ini" ;;
-    all)    echo "all-models.ini" ;;
-  esac
-}
-
-echo "=== Deploying llama.cpp presets to $REMOTE_HOST ==="
+echo "=== Deploying llama-server config to $REMOTE_HOST ==="
 echo ""
 
 # ---------------------------------------------------------------------------
-# Copy preset files
+# Full deploy: wrapper + env + unit (skipped with --restart)
 # ---------------------------------------------------------------------------
-if [[ "$USE_TAILDROP" == "true" ]]; then
-  echo "--- Sending presets via Taildrop ---"
-  for f in "$PRESETS_DIR"/*.ini; do
-    echo "  Sending $(basename "$f")"
-    tailscale file cp "$f" "$REMOTE_HOST:"
-  done
-  echo ""
-  echo "Files sent via Taildrop. On pedrogpt, accept and move them:"
-  echo "  sudo mkdir -p $REMOTE_PRESETS_DIR"
-  echo "  sudo mv ~/Taildrop/*.ini $REMOTE_PRESETS_DIR/"
-  echo ""
+if [[ "$RESTART_ONLY" == "false" ]]; then
+  if [[ -z "$ENV_FILE" ]]; then
+    echo "ERROR: provide --env <file> (the local llama-server.env to deploy) or use --restart."
+    echo "       Start from the template: cp llama-server.env.example /tmp/llama-server.env,"
+    echo "       paste your HF_TOKEN into it, then: $0 --env /tmp/llama-server.env"
+    exit 1
+  fi
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "ERROR: env file not found: $ENV_FILE"
+    exit 1
+  fi
 
-  if [[ -n "$PRESET" ]]; then
-    echo "Then restart the service with:"
-    echo "  sudo systemctl restart $SERVICE_NAME"
+  # -------------------------------------------------------------------------
+  # Taildrop mode: send the files, print manual install steps, and stop.
+  # (Taildrop can't sudo-install or restart — use SCP mode for full automation.)
+  # -------------------------------------------------------------------------
+  if [[ "$USE_TAILDROP" == "true" ]]; then
+    echo "--- Sending files via Taildrop ---"
+    tailscale file cp "$SCRIPT_DIR/run-server.sh" "$REMOTE_HOST:"
+    tailscale file cp "$SCRIPT_DIR/llama-server.service" "$REMOTE_HOST:"
+    tailscale file cp "$ENV_FILE" "$REMOTE_HOST:"
     echo ""
-    echo "(Cannot auto-restart via Taildrop — use SCP mode for full automation)"
+    echo "Files sent. On $REMOTE_HOST, accept them and run:"
+    echo "  sudo install -m 0755 ~/Taildrop/run-server.sh $REMOTE_WRAPPER"
+    echo "  sudo install -m 0600 ~/Taildrop/$(basename "$ENV_FILE") $REMOTE_ENV_FILE"
+    echo "  sudo install -m 0644 ~/Taildrop/llama-server.service $SERVICE_FILE"
+    echo "  sudo rm -f /etc/systemd/system/${SERVICE_NAME}.service.d/preset.conf"
+    echo "  sudo systemctl daemon-reload && sudo systemctl restart $SERVICE_NAME"
+    exit 0
   fi
-else
-  echo "--- Copying presets via SCP ---"
-  ssh -t "$REMOTE_HOST" "sudo mkdir -p $REMOTE_PRESETS_DIR"
-  scp "$PRESETS_DIR"/*.ini "$REMOTE_HOST:/tmp/"
-  ssh -t "$REMOTE_HOST" "sudo mv /tmp/*.ini $REMOTE_PRESETS_DIR/ && sudo chmod 644 $REMOTE_PRESETS_DIR/*.ini"
-  echo "  Presets deployed to $REMOTE_HOST:$REMOTE_PRESETS_DIR/"
+
+  echo "--- Copying launcher wrapper -> $REMOTE_HOST:$REMOTE_WRAPPER ---"
+  scp "$SCRIPT_DIR/run-server.sh" "$REMOTE_HOST:/tmp/run-server.sh"
+
+  echo "--- Copying systemd unit -> $REMOTE_HOST:$SERVICE_FILE ---"
+  scp "$SCRIPT_DIR/llama-server.service" "$REMOTE_HOST:/tmp/llama-server.service"
+
+  echo "--- Copying $ENV_FILE -> $REMOTE_HOST:$REMOTE_ENV_FILE ---"
+  scp "$ENV_FILE" "$REMOTE_HOST:/tmp/llama-server.env"
+
+  # Install wrapper + env + committed unit, and retire the router drop-in.
+  echo "--- Installing on $REMOTE_HOST (sudo — you'll be prompted for your password) ---"
+  ssh -tt "$REMOTE_HOST" "sudo install -m 0755 /tmp/run-server.sh $REMOTE_WRAPPER \
+    && sudo install -m 0600 /tmp/llama-server.env $REMOTE_ENV_FILE \
+    && sudo install -m 0644 /tmp/llama-server.service $SERVICE_FILE \
+    && sudo rm -f /etc/systemd/system/${SERVICE_NAME}.service.d/preset.conf \
+    && sudo rmdir /etc/systemd/system/${SERVICE_NAME}.service.d 2>/dev/null || true \
+    && rm -f /tmp/run-server.sh /tmp/llama-server.env /tmp/llama-server.service"
+  echo "  Wrapper, env, and unit installed; router drop-in removed."
   echo ""
+fi
 
-  # -------------------------------------------------------------------------
-  # Restart service with preset (SCP mode only)
-  # -------------------------------------------------------------------------
-  if [[ -n "$PRESET" ]]; then
-    INI_FILE="$(preset_file "$PRESET")"
-    REMOTE_INI="$REMOTE_PRESETS_DIR/$INI_FILE"
+# ---------------------------------------------------------------------------
+# Restart and health-check
+# ---------------------------------------------------------------------------
+echo "--- Restarting $SERVICE_NAME ---"
+ssh -tt "$REMOTE_HOST" "sudo systemctl daemon-reload && sudo systemctl restart $SERVICE_NAME"
+sleep 5
 
-    echo "--- Activating preset: $PRESET ($INI_FILE) ---"
-
-    # Build extra flags for specific presets
-    EXTRA_FLAGS=""
-    if [[ "$PRESET" == "all" ]]; then
-      # MoE expert offload: keep attention on GPU, experts in 64GB RAM
-      EXTRA_FLAGS='    -ot ".ffn_.*_exps.=CPU" \\\n    --flash-attn on \\'
-    fi
-
-    PRESET_PORT="\${PORT}"
-    if [[ "$PRESET" == "tts" ]]; then
-      PRESET_PORT="8001"
-    fi
-
-    # Write preset.conf to a local temp file, SCP it, then move into place with sudo
-    TMPCONF="$(mktemp)"
-    trap 'rm -f "$TMPCONF"' EXIT
-
-    cat > "$TMPCONF" <<CONF
-[Service]
-ExecStart=
-ExecStart=/opt/llama.cpp/build/bin/llama-server \\
-    --host 0.0.0.0 \\
-    --port $PRESET_PORT \\
-    --models-preset $REMOTE_INI \\
-    --models-max 1 \\
-    --jinja \\
-    --no-webui \\
-    --metrics \\
-    --embeddings \\
-    --pooling mean$(if [[ -n "$EXTRA_FLAGS" ]]; then printf " \\\\\n$EXTRA_FLAGS"; fi)
-CONF
-
-    scp "$TMPCONF" "$REMOTE_HOST:/tmp/preset.conf"
-    ssh -t "$REMOTE_HOST" "sudo mkdir -p /etc/systemd/system/${SERVICE_NAME}.service.d && sudo mv /tmp/preset.conf /etc/systemd/system/${SERVICE_NAME}.service.d/preset.conf && sudo chmod 644 /etc/systemd/system/${SERVICE_NAME}.service.d/preset.conf"
-
-    ssh -t "$REMOTE_HOST" "sudo systemctl daemon-reload && sudo systemctl restart $SERVICE_NAME"
-    sleep 3
-
-    # Check health
-    if ssh -t "$REMOTE_HOST" "sudo systemctl is-active --quiet $SERVICE_NAME"; then
-      echo ""
-      echo "=== Preset '$PRESET' active on $REMOTE_HOST ==="
-      echo "Health:  curl http://$REMOTE_HOST:8080/health"
-      echo "Models:  curl http://$REMOTE_HOST:8080/v1/models"
-      echo "Logs:    ssh $REMOTE_HOST sudo journalctl -u $SERVICE_NAME -f"
-    else
-      echo "ERROR: $SERVICE_NAME failed to start"
-      ssh -t "$REMOTE_HOST" "sudo journalctl -u $SERVICE_NAME -n 30"
-      exit 1
-    fi
-  else
-    echo "Presets deployed. Use --preset <name> to activate one."
-    echo "Available: text, code, vision, tts, all"
-  fi
+if ssh -tt "$REMOTE_HOST" "sudo systemctl is-active --quiet $SERVICE_NAME"; then
+  echo ""
+  echo "=== $SERVICE_NAME active on $REMOTE_HOST ==="
+  echo "Health:  curl http://$REMOTE_HOST:8000/health"
+  echo "Models:  curl http://$REMOTE_HOST:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp"
+  echo "Logs:    ssh $REMOTE_HOST sudo journalctl -u $SERVICE_NAME -f"
+else
+  echo "ERROR: $SERVICE_NAME failed to start"
+  ssh -tt "$REMOTE_HOST" "sudo journalctl -u $SERVICE_NAME -n 40"
+  exit 1
 fi
 
 echo ""

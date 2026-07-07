@@ -1,15 +1,21 @@
 # pedrogpt Operations Guide
 
-Runtime operations for the llama-server on pedrogpt (100.121.229.114, RTX 5090).
+Runtime operations for the llama-server on pedrogpt (100.121.229.114, RTX 5090 / Blackwell sm_120).
 
-The server runs in **router mode**: all 5 models are registered, one loads at a time.
-Callers switch models by setting `"model"` in the API request — no service restarts needed.
+The server runs **one dedicated tuned model**: **Qwen3.6-27B with Multi-Token Prediction (MTP)**,
+served under the API id **`qwen3.6-27b-mtp`**. MTP is a self-speculative decoding mode (a draft head
+baked into the GGUF) that gives ~1.4–2.2x faster generation with no quality loss; it requires a single
+request stream (`--parallel 1`), so the box serves exactly one model.
+
+The service is launched by `/opt/llama.cpp/run-server.sh` from `/etc/llama-server.env`
+(see `setup-llama-cpp.sh`). The previous 5-model router was retired — see
+`docs/llama-cpp-build.md` for the build/perf rationale, and `presets/README.md` for the rollback path.
 
 ---
 
 ## Endpoints
 
-Base URL: `http://100.121.229.114:8080`
+Base URL: `http://100.121.229.114:8000`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -22,79 +28,54 @@ Base URL: `http://100.121.229.114:8080`
 ### Check health
 
 ```bash
-curl http://100.121.229.114:8080/health
+curl http://100.121.229.114:8000/health
 ```
 
 ### List registered models
 
 ```bash
-curl http://100.121.229.114:8080/v1/models | jq '.data[].id'
+curl http://100.121.229.114:8000/v1/models | jq '.data[].id'
 ```
 
 Expected output:
 ```
-"glm-4.7-flash"
-"nemotron-3-super-120b"
-"qwen3-next-80b"
-"qwen3-next-80b"
-"qwen2.5-vl-32b"
+"qwen3.6-27b-mtp"
 ```
 
 ---
 
-## Switching Models via API
+## Calling the model
 
-Set `"model"` to any registered model name. The server unloads the current model and
-loads the requested one (~30s swap time on first request).
+There is one model id: **`qwen3.6-27b-mtp`**. Pass it in the `"model"` field (OpenAI-compatible).
 
 ```bash
-# General chat / reasoning (default, loads on startup)
-# GLM-4.7-Flash: MoE 30B (3B active), benchmarks: AIME 25: 91.6, GPQA: 75.2
-curl http://100.121.229.114:8080/v1/chat/completions \
+# Chat / reasoning / coding — one tuned model for everything
+curl http://100.121.229.114:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "glm-4.7-flash",
-    "messages": [{"role": "user", "content": "explain recursion"}],
+    "model": "qwen3.6-27b-mtp",
+    "messages": [{"role": "user", "content": "write a Go HTTP server"}],
     "max_tokens": 500
   }'
 
-# Heavy reasoning
-curl http://100.121.229.114:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "nemotron-3-super-120b", "messages": [{"role": "user", "content": "solve this step by step..."}], "max_tokens": 1000}'
-
-# Coding (large context, MoE expert offload)
-curl http://100.121.229.114:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "qwen3-next-80b", "messages": [{"role": "user", "content": "write a Go HTTP server"}], "max_tokens": 500}'
-
-# Coding (lighter, faster)
-curl http://100.121.229.114:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "qwen3-next-80b", "messages": [{"role": "user", "content": "write a Go HTTP server"}], "max_tokens": 500}'
-
-# Vision (pass image as base64 or URL)
-curl http://100.121.229.114:8080/v1/chat/completions \
+# Generate embeddings
+curl http://100.121.229.114:8000/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen2.5-vl-32b",
-    "messages": [{
-      "role": "user",
-      "content": [
-        {"type": "text", "text": "what is in this image?"},
-        {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
-      ]
-    }],
-    "max_tokens": 300
-  }'
-
-# Generate embeddings (uses currently loaded model)
-curl http://100.121.229.114:8080/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "glm-4.7-flash",
+    "model": "qwen3.6-27b-mtp",
     "input": "The quick brown fox jumps over the lazy dog"
   }'
+```
+
+### Swapping the model later
+
+Single-model mode has no on-the-fly router. To change the model, update
+`/etc/llama-server.env` and restart — use `switch-model.sh` on the box:
+
+```bash
+ssh pedrogpt
+./switch-model.sh download unsloth/Qwen3.6-27B-MTP-GGUF "*UD-Q4_K_XL*" /opt/models/qwen3.6-27b-mtp
+./switch-model.sh /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-UD-Q4_K_XL.gguf qwen3.6-27b-mtp
 ```
 
 ### Embeddings Pooling
@@ -112,17 +93,19 @@ The server uses `--pooling mean` which averages all token embeddings into a sing
 Add `"stream": true` to get token-by-token responses:
 
 ```bash
-curl http://100.121.229.114:8080/v1/chat/completions \
+curl http://100.121.229.114:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "glm-4.7-flash",
+    "model": "qwen3.6-27b-mtp",
     "messages": [{"role": "user", "content": "write a story"}],
     "stream": true
   }'
 ```
 
-> **Note:** GLM-4.7-Flash and nemotron are reasoning models. They produce `reasoning_content`
-> internally before outputting `content`. Use `max_tokens >= 500` to get a complete response.
+> **Note:** Qwen3.6 has a thinking mode that emits `reasoning_content` before `content`. The server
+> launches with `--chat-template-kwargs '{"enable_thinking":false}'` to keep responses direct; pass
+> `chat_template_kwargs: {"enable_thinking": true}` per request to re-enable it, and use
+> `max_tokens >= 500` so reasoning output isn't truncated.
 
 ---
 
@@ -146,11 +129,12 @@ ssh soypete@100.121.229.114 "sudo journalctl -u llama-server -f"
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `activating (auto-restart)` | Service crash loop | Check `journalctl -u llama-server -n 50` |
-| `model not found` | Wrong model name in API request | Use exact section names from INI (e.g. `gpt-oss-20b`) |
-| `--flash-attn: expected value` | Old flag syntax | Use `--flash-attn on` in drop-in |
-| Empty `content`, has `reasoning_content` | Reasoning model hit token limit | Increase `max_tokens` |
-| CUDA forward compat warning | Non-fatal driver mismatch warning | Ignore — model still loads on CPU or GPU |
-| Model swap hangs >60s | Previous model didn't unload | Restart service: `sudo systemctl restart llama-server` |
+| `model not found` | Wrong model id in API request | Use `qwen3.6-27b-mtp` (the `--alias`) |
+| `unknown argument --spec-type` / `invalid spec-type` | Build predates MTP, or wrong spelling | Rebuild from recent master; `llama-server --help \| grep -i spec` (may be `mtp` vs `draft-mtp`) |
+| `--flash-attn: expected value` | Old flag syntax | Use `--flash-attn on` |
+| ~11 tok/s, very slow | Mis-built CUDA backend | Rebuild sm_120 + CUDA 12.8 + `FORCE_CUBLAS=OFF`; see `docs/llama-cpp-build.md` |
+| Empty `content`, has `reasoning_content` | Thinking mode hit token limit | Increase `max_tokens` or disable thinking |
+| CUDA forward compat warning | Non-fatal driver mismatch warning | Ignore — model still loads |
 
 ### Inspect the active systemd config
 
@@ -158,55 +142,32 @@ ssh soypete@100.121.229.114 "sudo journalctl -u llama-server -f"
 ssh soypete@100.121.229.114 "systemctl cat llama-server"
 ```
 
-### Check which model is loaded
+### Verify the loaded model and MTP
 
 ```bash
-curl http://100.121.229.114:8080/v1/models | jq '.data[] | select(.meta.n_ctx_train) | {id, loaded: true}'
+curl http://100.121.229.114:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp
+# MTP / spec-decoding shows up in the startup logs:
+ssh soypete@100.121.229.114 "sudo journalctl -u llama-server | grep -i 'spec\|draft\|mtp' | tail"
 ```
 
 ---
 
-## Adding a New Model
+## Replacing the model
 
-1. **Find the model** — check [LiveBench](https://livebench.ai) for scores, find GGUF on HuggingFace
-   (prefer `unsloth` or `bartowski` repos, `UD-Q4_K_XL` for MoE, `Q4_K_M` for dense)
-
-2. **Download to pedrogpt:**
+Single-model mode has no router. To change the served model, swap it in
+`/etc/llama-server.env` and restart — `switch-model.sh` does both (run it on the box):
 
 ```bash
 ssh soypete@100.121.229.114
-~/.local/bin/hf download <org>/<model>-GGUF \
-  --include "*Q4_K_M*" \
-  --local-dir ~/models/<model-name>
-sudo mv ~/models/<model-name> /opt/models/
+# download a new GGUF (prefer an MTP variant for the free speedup)
+./switch-model.sh download <org>/<model>-GGUF "*UD-Q4_K_XL*" /opt/models/<model-name>
+# activate it (path + API alias); MTP is auto-disabled for non-MTP GGUFs
+./switch-model.sh /opt/models/<model-name>/<file>.gguf <api-alias>
 ```
 
-3. **Add a section to `presets/all-models.ini`:**
-
-```ini
-[my-new-model]
-model = /opt/models/my-new-model/my-new-model-Q4_K_M.gguf
-ctx-size = 16384
-```
-
-4. **Deploy the updated INI:**
-
-```bash
-scp scripts/pedrogpt/presets/*.ini soypete@100.121.229.114:/tmp/
-ssh soypete@100.121.229.114 "sudo mv /tmp/*.ini /opt/llama.cpp/presets/ && sudo chmod 644 /opt/llama.cpp/presets/*.ini"
-```
-
-5. **Restart the service:**
-
-```bash
-ssh soypete@100.121.229.114 "sudo systemctl restart llama-server"
-```
-
-6. **Verify it's registered:**
-
-```bash
-curl http://100.121.229.114:8080/v1/models | jq '.data[].id'
-```
+When picking a model: check [LiveBench](https://livebench.ai) for scores, find a GGUF on HuggingFace
+(prefer `unsloth`/`bartowski`), size it to leave VRAM for the KV cache (dense up to ~30B at Q4 fits
+32GB), and prefer a model that ships an MTP head.
 
 ---
 
@@ -218,25 +179,24 @@ curl http://100.121.229.114:8080/v1/models | jq '.data[].id'
 ssh soypete@100.121.229.114 "sudo systemctl restart llama-server"
 ```
 
-### View the drop-in override
+### View the launch config
 
 ```bash
-cat /etc/systemd/system/llama-server.service.d/preset.conf
+ssh soypete@100.121.229.114 "cat /etc/llama-server.env; cat /opt/llama.cpp/run-server.sh"
 ```
 
-### Rollback to single-model mode
+### Roll back to the old router (5-model) mode
 
-```bash
-ssh soypete@100.121.229.114
-sudo rm /etc/systemd/system/llama-server.service.d/preset.conf
-sudo systemctl daemon-reload
-sudo systemctl restart llama-server
-```
+The router mechanism is retired but recoverable: restore a `--models-preset` drop-in at
+`/etc/systemd/system/llama-server.service.d/preset.conf` pointing at `presets/all-models.ini`,
+`daemon-reload`, and restart. See `presets/README.md` and `git log` for the prior config. Note MTP
+cannot run in router mode (`--parallel 1` only), so rolling back trades the MTP speedup for
+multi-model switching.
 
 ### Check Prometheus metrics
 
 ```bash
-curl http://100.121.229.114:8080/metrics | grep -E 'llama_|requests_'
+curl http://100.121.229.114:8000/metrics | grep -E 'llama_|requests_'
 ```
 
 ### GPU memory usage
@@ -251,10 +211,10 @@ ssh soypete@100.121.229.114 "nvidia-smi --query-gpu=memory.used,memory.free,memo
 
 | Path | Description |
 |------|-------------|
-| `/opt/llama.cpp/` | llama.cpp build |
-| `/opt/llama.cpp/presets/all-models.ini` | Active model roster |
-| `/opt/models/` | Downloaded GGUF model files |
-| `/etc/systemd/system/llama-server.service` | Base systemd unit |
-| `/etc/systemd/system/llama-server.service.d/preset.conf` | Drop-in override (router mode) |
-| `/etc/llama-server.env` | Runtime env vars (PORT, N_PARALLEL) |
-| `scripts/pedrogpt/presets/` | Source INI files (deploy from here) |
+| `/opt/llama.cpp/` | llama.cpp build (CUDA 12.8, sm_120) |
+| `/opt/llama.cpp/build/bin/llama-server` | server binary |
+| `/opt/llama.cpp/run-server.sh` | launcher wrapper (reads the env file, assembles MTP/KV flags) |
+| `/opt/models/qwen3.6-27b-mtp/` | the MTP GGUF |
+| `/etc/systemd/system/llama-server.service` | systemd unit (deployed from `scripts/pedrogpt/llama-server.service`) |
+| `/etc/llama-server.env` | runtime config: `MODEL`, `MODEL_ALIAS`, `SPEC_TYPE`, `N_CTX`, sampling, etc. |
+| `scripts/pedrogpt/presets/all-models.ini` | rollback/reference INI for router mode (not used live) |
