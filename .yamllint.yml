@@ -20,3 +20,5 @@ ignore: |
   foundry-repo/
   node_modules/
   venv/
+  # Helm values files are not Kubernetes manifests
+  k8s/monitoring/grafana-values.yaml

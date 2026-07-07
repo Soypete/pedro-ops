@@ -185,11 +185,6 @@ export TS_CLIENT_SECRET="your_client_secret"
 - Validates: Kubernetes manifests, YAML linting, Kustomize builds
 - Tools: kubectl, kustomize, yamllint
 
-### Production Deployment (`.github/workflows/deploy-production.yml`)
-- Runs on: Manual trigger or tag push
-- Deploys: Production overlays to cluster
-- Requires: Kubeconfig secret in GitHub
-
 ## Operational Guidelines
 
 ### Before Making Changes

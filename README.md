@@ -114,8 +114,7 @@ pedro-ops/
 │   └── tailscale-setup.md     # Tailscale setup details
 └── .github/
     └── workflows/              # CI/CD workflows
-        ├── validate-manifests.yml
-        └── deploy-production.yml
+        └── validate-manifests.yml
 ```
 
 ## Common Operations
