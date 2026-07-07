@@ -1,10 +1,16 @@
 # Building llama.cpp for RTX 5090 (Blackwell)
 
-Build instructions for llama.cpp with CUDA support on the pedrogpt machine (RTX 5090, sm_89).
+Build instructions for llama.cpp with CUDA support on the pedrogpt machine (RTX 5090, **sm_120**).
+
+> **The single most important fact:** the RTX 5090 is Blackwell = compute capability **12.0** =
+> `CMAKE_CUDA_ARCHITECTURES=120`. It is **not** sm_89 (that's the Ada RTX 4090). Building for the
+> wrong arch — or with CUDA 13.x, or with cuBLAS forced on — silently falls back to a slow path and
+> is the most common cause of inexplicably low tok/s on this card.
 
 ## Prerequisites
 
-- **CUDA 12.8+** - RTX 5090 (Blackwell/sm_89) requires CUDA 12.8 or newer
+- **CUDA 12.8 (exactly this line — not 13.x)** - RTX 5090 (Blackwell/sm_120) requires CUDA 12.8.
+  CUDA 13.x's MMQ kernels crash on Blackwell and fall back to cuBLAS (~5-6x slower).
 - **Ubuntu 24.04** or similar Linux distribution
 - **Build tools**: cmake, git, build-essential
 
@@ -20,7 +26,7 @@ sudo apt-get update
 sudo apt-get install -y cuda-toolkit-12-8
 
 # Add to PATH (add to ~/.bashrc for persistence)
-export PATH=/usr/local/cuda/bin:$PATH
+export PATH=/usr/local/cuda-12.8/bin:$PATH
 ```
 
 ## Build Commands
@@ -32,18 +38,25 @@ export PATH=/usr/local/cuda/bin:$PATH
 git clone https://github.com/ggml-org/llama.cpp.git /opt/llama.cpp
 cd /opt/llama.cpp
 
-# Configure with CUDA for RTX 5090 (sm_89)
+# Remove any stale build dir first — cached CMake vars (forced cuBLAS, old arch)
+# leak across reconfigures and are a common cause of a slow rebuild.
+rm -rf build
+
+# Configure with CUDA for RTX 5090 (Blackwell, sm_120)
 cmake -B build \
   -DGGML_CUDA=ON \
-  -DCMAKE_CUDA_ARCHITECTURES=89 \
+  -DCMAKE_CUDA_ARCHITECTURES=120 \
+  -DGGML_CUDA_FORCE_CUBLAS=OFF \
+  -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLAMA_SERVER_VERBOSE=OFF
 
 # Build (uses all available cores)
 cmake --build build --config Release -j$(nproc)
 
-# Verify
+# Verify the build, and that cuBLAS was NOT forced on
 ./build/bin/llama-server --version
+grep FORCE_CUBLAS build/CMakeCache.txt   # expect: ...=OFF
 ```
 
 ### Using the rebuild script (recommended)
@@ -61,9 +74,11 @@ Or run directly on pedrogpt:
 ssh soypete@100.121.229.114
 cd /opt/llama.cpp
 
-# Pull latest and rebuild
+# Pull latest and rebuild (clean build dir first)
 git pull
-cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120
+rm -rf build
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120 \
+  -DGGML_CUDA_FORCE_CUBLAS=OFF -DCUDAToolkit_ROOT=/usr/local/cuda-12.8
 cmake --build build --config Release -j$(nproc)
 
 # Restart service
@@ -72,23 +87,47 @@ sudo systemctl restart llama-server
 
 ## Architecture Flags
 
-| GPU | sm_ | CUDA Arch |
-|-----|-----|-----------|
-| RTX 5090 | 96 | Blackwell |
-| RTX 4090 | 89 | Ada Lovelace |
-| RTX 3090/4090 | 86 | Ampere |
-| A100 | 80 | Ampere |
+`CMAKE_CUDA_ARCHITECTURES` takes the compute capability with the dot removed (12.0 → 120).
+
+| GPU | Arch family | Compute cap | `CMAKE_CUDA_ARCHITECTURES` |
+|-----|-------------|-------------|----------------------------|
+| RTX 5090 | Blackwell | 12.0 | **120** |
+| RTX 4090 | Ada Lovelace | 8.9 | 89 |
+| RTX 3090 | Ampere | 8.6 | 86 |
+| A100 | Ampere | 8.0 | 80 |
 
 ## Troubleshooting
+
+### Inexplicably slow inference (e.g. ~11 tok/s on a 5090)
+
+A 4-bit ~27B model on a 5090 should generate in the high double / triple digits of tok/s. If you see
+~10 tok/s, the CUDA backend is almost certainly mis-built. Check, in order:
+
+1. **Wrong arch / PTX JIT.** Built for sm_89 (4090) instead of sm_120 forces a slow PTX recompile or
+   wrong kernels. Rebuild with `-DCMAKE_CUDA_ARCHITECTURES=120`.
+2. **CUDA 13.x.** Its MMQ kernels crash on Blackwell → cuBLAS fallback (~5-6x slower prefill). Use the
+   CUDA 12.8 toolkit (`nvcc --version` should show 12.8).
+3. **cuBLAS forced on.** `grep FORCE_CUBLAS build/CMakeCache.txt` must show `OFF`. A stale `build/`
+   dir is the usual culprit — `rm -rf build` and reconfigure.
+4. **Not fully offloaded.** Confirm `-ngl 99` (or `-1`) and that `nvidia-smi` shows the weights in
+   VRAM, not split to CPU.
+
+### MXFP4 PTX build error on sm_120
+
+Some commits fail to compile MXFP4 kernels for sm_120
+(`Instruction 'mma with block scale' not supported on .target 'sm_120'`), and
+`-DGGML_CUDA_MXFP4=OFF` does not reliably disable it (issue #19662). Fix: ensure CUDA 12.8 (not 13.x)
+and build a recent master where it's resolved. This only affects MXFP4 models (e.g. GPT-OSS) at build
+time — Qwen3.6 GGUFs are K-quants and unaffected at runtime.
 
 ### CUDA version too old
 
 ```
 ERROR: CUDA 12.x is too old for RTX 5090 (Blackwell).
-Blackwell (sm_89) requires CUDA 12.8 or newer.
+Blackwell (sm_120) requires CUDA 12.8.
 ```
 
-**Fix**: Install CUDA 12.8+ from NVIDIA's repository (see above).
+**Fix**: Install the CUDA 12.8 toolkit from NVIDIA's repository (see above). Do not use 13.x.
 
 ### OOM on model load
 
@@ -143,7 +182,7 @@ ssh soypete@100.121.229.114 "sudo journalctl -u llama-server -f"
 ssh soypete@100.121.229.114 "nvidia-smi"
 
 # Test embeddings
-curl http://100.121.229.114:8080/v1/embeddings \
+curl http://100.121.229.114:8000/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{"model": "glm-4.7-flash", "input": "Hello world"}'
 ```

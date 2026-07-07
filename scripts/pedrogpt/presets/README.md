@@ -1,217 +1,64 @@
 # llama.cpp Model Presets
 
-Model preset configurations for pedrogpt (RTX 5090, 32GB VRAM, 64GB RAM).
+pedrogpt (RTX 5090, sm_120, 32GB VRAM, 64GB RAM) runs **one dedicated tuned model**:
+**Qwen3.6-27B with Multi-Token Prediction (MTP)**.
 
-Ref: [Model Management in llama.cpp](https://huggingface.co/blog/ggml-org/model-management-in-llamacpp)
+The live server is launched by `/opt/llama.cpp/run-server.sh` from `/etc/llama-server.env`
+(installed by `setup-llama-cpp.sh`) — a single-model invocation, **not** router/`--models-preset`
+mode. MTP requires a single stream (`parallel = 1`) and cannot coexist with multi-slot batching, so
+the box serves exactly one model.
 
-## Presets
+`all-models.ini` in this directory is kept only as a **rollback / reference artifact** describing the
+MTP model for router mode; it is not what the running service reads.
 
-| Preset | Section Name | Model | Type | Use Case |
-|--------|-------------|-------|------|----------|
-| `text.ini` | `glm-4.7-flash` | GLM-4.7-Flash UD-Q6_K_XL | MoE (3B active) | General chat, reasoning (default) |
-| `text.ini` | `nemotron-3-super-120b` | Nemotron-3-Super 120B-A12B UD-Q4_K_XL | MoE (12B active) | Heavy reasoning |
-| `text.ini` | `qwen3.6-27b` | Qwen3.6-27B Q4_K_S | Dense | Balanced chat |
-| `all-models.ini` | all of the above | — | Router | Dynamic switching via API |
-| `vision.ini` | `qwen2.5-vl-32b` | Qwen2.5-VL 32B Q4_K_M | Dense | Image understanding, OCR |
-| `tts.ini` | `qwen2.5-omni-7b` | Qwen2.5-Omni 7B | Dense | Text-to-speech (port 8001) |
+> History: this box previously ran a 5-model router (GLM-4.7-Flash, Nemotron-3-Super-120B,
+> Qwen3-Next-80B, Qwen2.5-VL-32B, plain Qwen3.6-27B). Those were retired in favor of the single fast
+> MTP model. See `git log` and `docs/llama-cpp-build.md` for the rationale.
 
-## How It Works
+## The model
 
-With `--models-preset`, llama-server registers all models from the INI file.
-You switch models by setting the `"model"` field in your API request to the
-**section name** from the INI. The server loads/unloads on demand:
+| Section | Model | Quant | Type | Notes |
+|---------|-------|-------|------|-------|
+| `qwen3.6-27b-mtp` | Qwen3.6-27B-MTP | UD-Q4_K_XL (~17.9 GB) | Dense + MTP head | self-speculative decoding, `parallel=1` |
 
-```bash
-# Start server with all models registered
-llama-server \
-  --models-preset /opt/llama.cpp/presets/all-models.ini \
-  --models-max 1 \
-  --host 0.0.0.0 --port 8080 \
-  --metrics
+API model id: **`qwen3.6-27b-mtp`** (set via `--alias`). Callers pass it in the `"model"` field.
 
-# Use the default model (glm-4.7-flash loads on startup)
-curl http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "glm-4.7-flash", "messages": [{"role": "user", "content": "hello"}]}'
-
-# Switch to heavy reasoning — server unloads current model, loads nemotron
-curl http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "nemotron-3-super-120b", "messages": [{"role": "user", "content": "solve this step by step"}]}'
-```
-
-With `--models-max 1`, only one model occupies VRAM at a time. When you
-request a different model, the server evicts the current model from VRAM
-and loads the new one (~30s swap time).
-
-### MoE expert offload
-
-For MoE models (GLM-4.7-Flash, nemotron-3-super-120b, qwen3-next-80b), offload
-expert layers to system RAM while keeping attention on GPU. Add `-ot` to the CLI:
+## Downloading the model
 
 ```bash
-llama-server \
-  --models-preset /opt/llama.cpp/presets/all-models.ini \
-  -ot ".ffn_.*_exps.=CPU" \
-  --flash-attn on \
-  --host 0.0.0.0 --port 8080 \
-  --metrics
-```
-
-> **Note:** `--flash-attn` requires an explicit value (`on`, `off`, or `auto`). Omitting it causes a startup error.
-
-### TTS (separate process on port 8001)
-
-```bash
-llama-server \
-  --models-preset /opt/llama.cpp/presets/tts.ini \
-  --host 0.0.0.0 --port 8001 \
-  --metrics
-```
-
-### Deploy to pedrogpt
-
-```bash
-# Deploy presets only
-./scripts/pedrogpt/deploy-presets.sh
-
-# Deploy and activate a preset
-./scripts/pedrogpt/deploy-presets.sh --preset all
-./scripts/pedrogpt/deploy-presets.sh --preset text
-```
-
-## Downloading Models
-
-Models live in `/opt/models/` on pedrogpt. Download with `huggingface-cli`:
-
-```bash
-pip install huggingface_hub hf_transfer
-
-# Default chat (GLM-4.7-Flash)
-hf download unsloth/GLM-4.7-Flash-GGUF \
-  --include "*UD-Q6_K_XL*" \
-  --local-dir /opt/models/glm-4.7-flash
-
-# Heavy reasoning
-hf download unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF \
+hf download unsloth/Qwen3.6-27B-MTP-GGUF \
   --include "*UD-Q4_K_XL*" \
-  --local-dir /opt/models/nemotron-3-super-120b
-
-# Coding (large context)
-hf download unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF \
-  --include "*UD-Q4_K_XL*" \
-  --local-dir /opt/models/qwen3-next-80b
-
-# Vision
-hf download Qwen/Qwen2.5-VL-32B-Instruct-GGUF \
-  --include "*Q4_K_M*" \
-  --local-dir /opt/models/qwen2.5-vl-32b
-
-# TTS
-hf download Qwen/Qwen2.5-Omni-7B-GGUF \
-  --local-dir /opt/models/qwen2.5-omni-7b
+  --local-dir /opt/models/qwen3.6-27b-mtp
 ```
 
-If downloads get stuck, set `HF_HUB_ENABLE_HF_TRANSFER=1` for faster transfers.
+Q5_K_M (~19.8 GB) is the fallback if more quality headroom is wanted — both fit 32GB VRAM alongside
+the MTP head and a q8_0 KV cache.
 
-## Finding New Models
+## Tuning reference (set in /etc/llama-server.env)
 
-### Step 1: Check LiveBench scores
+| Setting | Value | Why |
+|---------|-------|-----|
+| `-ngl -1` | all layers on GPU | dense 27B fits fully; any CPU layer tanks throughput |
+| `-fa on` | flash attention | faster + prerequisite for KV-cache quantization |
+| `--cache-type-k/v q8_0` | quantized KV | ~halves KV VRAM; **K and V must match** or attention falls back to a slow path |
+| `-ub 1024` | micro-batch | larger ubatch improves prefill; safe on a 5090 |
+| `-np 1` | single slot | **required** by MTP |
+| `--spec-type draft-mtp --spec-draft-n-max 2` | enable MTP | self-speculative decoding, ~1.4–2.2x, no quality loss |
 
-Go to [LiveBench](https://livebench.ai/#/?highunseenbias=true) to find
-top-performing models:
+> Confirm the exact spec-type spelling for your build: `llama-server --help | grep -i spec`.
+> Some builds spell it `mtp` rather than `draft-mtp`.
 
-1. Enable **"High Unseen Bias"** to filter for models tested on unseen data
-2. Sort by **Overall** or by category (Coding, Reasoning, Math, etc.)
-3. Look for open-weight models — MoE with low active params are ideal
-4. Note the model name (e.g., "Qwen3-Next-80B-A3B")
+## Finding a future replacement model
 
-### Step 2: Find GGUF quantizations on HuggingFace
+1. **Check [LiveBench](https://livebench.ai/#/?highunseenbias=true)** — enable "High Unseen Bias",
+   sort by Overall or category.
+2. **Find a GGUF on [HuggingFace](https://huggingface.co)** — prefer `unsloth` or `bartowski`. For a
+   dense model on 32GB VRAM, `Q4_K_M`/`UD-Q4_K_XL` up to ~30B leaves room for KV cache.
+3. **Prefer an MTP GGUF** when available — the built-in draft head gives a free speedup.
 
-1. Go to [HuggingFace](https://huggingface.co)
-2. Search for `<model-name> GGUF` (e.g., "Qwen3-Next-80B-A3B GGUF")
-3. Look for repos by **unsloth** or **bartowski** — they provide reliable quants
-4. For MoE models, prefer **UD-Q4_K_XL** (unsloth dynamic quant) — applies
-   higher precision to important layers automatically
-5. Quant sizing guide:
-
-| Quantization | Quality | Notes |
-|-------------|---------|-------|
-| UD-Q4_K_XL | Excellent | Unsloth dynamic quant, best for MoE |
-| UD-Q2_K_XL | Good | Unsloth dynamic 2-bit, smaller |
-| Q8_0 | Near-lossless | ~1.1x active params in GB |
-| Q6_K | Excellent | ~0.85x active params in GB |
-| Q5_K_M | Very good | ~0.73x active params in GB |
-| Q4_K_M | Good | ~0.6x active params in GB |
-
-### Step 3: Size for pedrogpt
-
-**32GB VRAM:**
-- **Dense**: Up to ~25B at Q4_K_M, ~20B at Q8_0
-- **MoE**: 80-120B+ total params — only active params matter.
-  Use `-ot ".ffn_.*_exps.=CPU"` to put experts in 64GB RAM.
-- **Context**: Use `--flash-attn` to push to 64K+ on small-active MoE models.
-
-**64GB system RAM:**
-- Offload MoE experts: `-ot ".ffn_.*_exps.=CPU"`
-- KV cache spills to RAM for long contexts
-- Set `n-gpu-layers` to control GPU/RAM split
-
-### Step 4: Add to a preset and deploy
-
-1. Download the model:
-
-```bash
-hf download org/new-model-GGUF \
-  --include "*Q4_K_M*" \
-  --local-dir /opt/models/new-model
-```
-
-2. Add a section to the relevant preset INI:
-
-```ini
-[new-model]
-model = /opt/models/new-model/new-model-Q4_K_M.gguf
-ctx-size = 16384
-```
-
-3. Deploy and test:
-
-```bash
-./scripts/pedrogpt/deploy-presets.sh --preset all
-
-curl http://pedrogpt:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "new-model", "messages": [{"role": "user", "content": "Hello"}]}'
-```
-
-## Preset INI Format Reference
-
-```ini
-version = 1
-
-# Global defaults (apply to all models unless overridden)
-[*]
-n-gpu-layers = -1
-ctx-size = 8192
-jinja = true
-
-# Model section — the section name is what you pass as "model" in API requests
-[my-model-name]
-model = /opt/models/my-model/my-model-Q4_K_M.gguf
-ctx-size = 16384                # Context size
-n-gpu-layers = 99               # GPU layer count (-1 = all)
-flash-attn = true               # Flash attention
-load-on-startup = true          # Auto-load when server starts
-stop-timeout = 30               # Seconds before force-kill on swap
-chat-template = chatml          # Override chat template
-temp = 0.6                      # Sampling temperature
-top-p = 0.95                    # Top-p sampling
-model-draft = /path/to.gguf     # Speculative decoding draft model
-```
-
-Keys correspond to llama-server CLI args (without leading `--`).
-Both short forms (`c`, `ngl`) and env var names (`LLAMA_ARG_N_GPU_LAYERS`) work.
-
-**Note:** Router-level args (`--host`, `--port`, `-ot`) go on the CLI, not in
-the INI. The INI defines per-model settings only.
+| Quant | Quality | Notes |
+|-------|---------|-------|
+| UD-Q4_K_XL | Excellent | unsloth dynamic 4-bit, recommended |
+| Q5_K_M | Very good | more headroom, still fits |
+| Q6_K | Excellent | ~22.9 GB, tighter KV budget |
+| Q8_0 | Near-lossless | ~29 GB, small context only |

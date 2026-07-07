@@ -1,27 +1,23 @@
 #!/bin/bash
 
-# Switch the active llama.cpp model on pedrogpt.
-# Uses llama-server's built-in --hf-repo/--hf-file flags so the server
-# downloads and caches the model itself (no manual wget needed).
-# Models are cached in HF_HOME (/opt/models/cache) on the 2TB drive.
+# Switch the active model on pedrogpt (single-model mode).
 #
-# pedrogpt hardware: 32GB VRAM + 64GB RAM
+# pedrogpt runs ONE tuned model launched by /opt/llama.cpp/run-server.sh from
+# /etc/llama-server.env. This script updates MODEL (the local GGUF path) and
+# MODEL_ALIAS (the API id) in that env file, then restarts llama-server.
 #
-# pedro models (verified):
-#   unsloth/GLM-4.7-Flash-GGUF                      UD-Q6_K_XL (multi-file)           MoE 30B (3B active), 26.2 GB
-#   unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF  UD-Q4_K_XL (multi-file)           MoE 12B active
-#   unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF        UD-Q4_K_XL (multi-file)           MoE 3B active
-#   unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF       Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf  18.6 GB MoE
-#   unsloth/Qwen3.5-35B-A3B-GGUF                    Qwen3.5-35B-A3B-Q4_K_M.gguf      21.2 GB MoE
+# Run this ON pedrogpt (it edits /etc/llama-server.env directly).
+#
+# Current model: Qwen3.6-27B MTP (qwen3.6-27b-mtp) — has a built-in MTP draft head,
+# enabled via SPEC_TYPE=draft-mtp in the env file. No separate draft model needed.
 #
 # Usage:
-#   ./switch-model.sh <hf-repo> <hf-file>
-#   ./switch-model.sh list
+#   ./switch-model.sh <gguf-path> <api-alias>
+#   ./switch-model.sh download <hf-repo> <include-glob> <local-dir>   # fetch a new GGUF
 #
 # Examples:
-#   ./switch-model.sh unsloth/GLM-4.7-Flash-GGUF GLM-4.7-Flash-UD-Q6_K_XL-00001-of-00002.gguf
-#   ./switch-model.sh unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf
-#   ./switch-model.sh unsloth/Qwen3.5-35B-A3B-GGUF Qwen3.5-35B-A3B-Q4_K_M.gguf
+#   ./switch-model.sh /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-UD-Q4_K_XL.gguf qwen3.6-27b-mtp
+#   ./switch-model.sh download unsloth/Qwen3.6-27B-MTP-GGUF "*UD-Q4_K_XL*" /opt/models/qwen3.6-27b-mtp
 
 set -euo pipefail
 
@@ -29,114 +25,68 @@ ENV_FILE="/etc/llama-server.env"
 SUBCOMMAND="${1:-}"
 
 # ---------------------------------------------------------------------------
-# list: show available pedro models
+# download: fetch a GGUF into /opt/models
 # ---------------------------------------------------------------------------
-if [[ "$SUBCOMMAND" == "list" ]]; then
-  echo "pedro models:"
-  echo ""
-  echo "  unsloth/GLM-4.7-Flash-GGUF"
-  echo "    UD-Q6_K_XL (multi-file)           MoE 30B total, 3B active, 26.2 GB"
-  echo "    UD-Q4_K_XL (multi-file)           MoE smaller footprint, 17.5 GB"
-  echo ""
-  echo "  unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF"
-  echo "    UD-Q4_K_XL (multi-file)           MoE 120B total, 12B active"
-  echo "    UD-Q2_K_XL (multi-file)           MoE smaller footprint"
-  echo ""
-  echo "  unsloth/Qwen3-Next-80B-A3B-Instruct-GGUF"
-  echo "    UD-Q4_K_XL (multi-file)           MoE 80B total, 3B active"
-  echo ""
-  echo "  unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
-  echo "    Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf  18.6 GB  MoE"
-  echo "    Qwen3-Coder-30B-A3B-Instruct-Q5_K_M.gguf  21.7 GB  MoE"
-  echo ""
-  echo "  unsloth/Qwen3.5-35B-A3B-GGUF"
-  echo "    Qwen3.5-35B-A3B-Q4_K_M.gguf      21.2 GB  MoE"
-  echo "    Qwen3.5-35B-A3B-Q5_K_M.gguf      24.8 GB  MoE"
-  echo ""
-  echo "Cached models in /opt/models/cache:"
-  find /opt/models/cache -name "*.gguf" -exec ls -lh {} \; 2>/dev/null || echo "  (none yet)"
+if [[ "$SUBCOMMAND" == "download" ]]; then
+  HF_REPO="${2:-}"; INCLUDE="${3:-}"; LOCAL_DIR="${4:-}"
+  if [[ -z "$HF_REPO" || -z "$INCLUDE" || -z "$LOCAL_DIR" ]]; then
+    echo "Usage: $0 download <hf-repo> <include-glob> <local-dir>"
+    exit 1
+  fi
+  echo "=== Downloading $HF_REPO ($INCLUDE) -> $LOCAL_DIR ==="
+  hf download "$HF_REPO" --include "$INCLUDE" --local-dir "$LOCAL_DIR"
+  echo "Done. Activate it with: $0 <gguf-path> <api-alias>"
   exit 0
 fi
 
 # ---------------------------------------------------------------------------
-# switch: update env and restart service
+# switch: update MODEL/MODEL_ALIAS and restart
 # ---------------------------------------------------------------------------
-HF_REPO="${1:-}"
-HF_FILE="${2:-}"
+MODEL_PATH="${1:-}"
+MODEL_ALIAS="${2:-}"
 
-if [[ -z "$HF_REPO" || -z "$HF_FILE" ]]; then
-  echo "Usage: $0 <hf-repo> <hf-file>"
-  echo "       $0 list"
+if [[ -z "$MODEL_PATH" || -z "$MODEL_ALIAS" ]]; then
+  echo "Usage: $0 <gguf-path> <api-alias>"
+  echo "       $0 download <hf-repo> <include-glob> <local-dir>"
   echo ""
-  echo "Examples:"
-  echo "  $0 unsloth/GLM-4.7-Flash-GGUF                    GLM-4.7-Flash-UD-Q6_K_XL-00001-of-00002.gguf"
-  echo "  $0 unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF     Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
-  echo "  $0 unsloth/Qwen3.5-35B-A3B-GGUF                  Qwen3.5-35B-A3B-Q4_K_M.gguf"
+  echo "Example:"
+  echo "  $0 /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-UD-Q4_K_XL.gguf qwen3.6-27b-mtp"
   exit 1
 fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: $ENV_FILE not found. Run setup-llama-cpp-ubuntu.sh first."
+  echo "ERROR: $ENV_FILE not found. Run setup-llama-cpp.sh first."
   exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# MoE detection — these models need expert layers offloaded to RAM via
-# --override-tensor to avoid OOM on 32GB VRAM.
-# ---------------------------------------------------------------------------
-is_moe_model() {
-  local repo="$1" file="$2"
-  case "$repo" in
-    *GLM*|*Qwen3-Next*|*Qwen3-Coder*|*Qwen3.5*|*Nemotron*Super*|*A3B*|*A12B*) return 0 ;;
-  esac
-  case "$file" in
-    *A3B*|*A12B*|*MoE*|*moe*) return 0 ;;
-  esac
-  return 1
-}
+if [[ ! -f "$MODEL_PATH" ]]; then
+  echo "WARNING: $MODEL_PATH not found on disk. Download it first with: $0 download ..."
+fi
 
 echo "=== Switching model ==="
-echo "Repo: $HF_REPO"
-echo "File: $HF_FILE"
+echo "MODEL:       $MODEL_PATH"
+echo "MODEL_ALIAS: $MODEL_ALIAS"
 echo ""
 
-sudo sed -i "s|^HF_REPO=.*|HF_REPO=$HF_REPO|" "$ENV_FILE"
-sudo sed -i "s|^HF_FILE=.*|HF_FILE=$HF_FILE|" "$ENV_FILE"
-
-if is_moe_model "$HF_REPO" "$HF_FILE"; then
-  OVERRIDE_TENSOR=".ffn_.*_exps.=CPU"
-  FLASH_ATTN="1"
-  echo "MoE model detected — setting OVERRIDE_TENSOR=$OVERRIDE_TENSOR, FLASH_ATTN=1"
-  echo "(expert layers offloaded to 64GB RAM, flash-attn reduces KV cache VRAM)"
-else
-  OVERRIDE_TENSOR=""
-  FLASH_ATTN=""
-  echo "Dense model — OVERRIDE_TENSOR and FLASH_ATTN cleared"
+# If this model has no MTP head, disable MTP to avoid a startup error.
+if [[ "$MODEL_PATH" != *MTP* && "$MODEL_PATH" != *mtp* ]]; then
+  echo "NOTE: '$MODEL_PATH' doesn't look like an MTP GGUF — clearing SPEC_TYPE so the"
+  echo "      server doesn't try to enable MTP on a model without a draft head."
+  sudo sed -i "s|^SPEC_TYPE=.*|SPEC_TYPE=|" "$ENV_FILE"
 fi
 
-if grep -q "^OVERRIDE_TENSOR" "$ENV_FILE"; then
-  sudo sed -i "s|^OVERRIDE_TENSOR=.*|OVERRIDE_TENSOR=$OVERRIDE_TENSOR|" "$ENV_FILE"
-else
-  echo "OVERRIDE_TENSOR=$OVERRIDE_TENSOR" | sudo tee -a "$ENV_FILE" > /dev/null
-fi
+sudo sed -i "s|^MODEL=.*|MODEL=$MODEL_PATH|" "$ENV_FILE"
+sudo sed -i "s|^MODEL_ALIAS=.*|MODEL_ALIAS=$MODEL_ALIAS|" "$ENV_FILE"
 
-if grep -q "^FLASH_ATTN" "$ENV_FILE"; then
-  sudo sed -i "s|^FLASH_ATTN=.*|FLASH_ATTN=$FLASH_ATTN|" "$ENV_FILE"
-else
-  echo "FLASH_ATTN=$FLASH_ATTN" | sudo tee -a "$ENV_FILE" > /dev/null
-fi
-
-echo "Updated $ENV_FILE"
-echo "Restarting llama-server (will download model if not cached)..."
-
+echo "Updated $ENV_FILE. Restarting llama-server..."
 sudo systemctl restart llama-server
 sleep 5
 
 if sudo systemctl is-active --quiet llama-server; then
   echo ""
-  echo "=== Active model: $HF_FILE ==="
-  echo "Health:  curl http://localhost:8080/health"
-  echo "Metrics: curl http://localhost:8080/metrics | grep llama"
+  echo "=== Active model: $MODEL_ALIAS ==="
+  echo "Health:  curl http://localhost:8000/health"
+  echo "Models:  curl http://localhost:8000/v1/models | jq '.data[].id'"
   echo "Logs:    sudo journalctl -u llama-server -f"
 else
   echo "ERROR: llama-server failed to start"

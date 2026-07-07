@@ -1,3 +1,8 @@
+> **Historical note (June 2026):** this post describes the previous *multi-model router* setup on
+> pedrogpt. The box has since been dedicated to a single tuned model (Qwen3.6-27B with MTP) for
+> maximum speed — see `making-llama-cpp-fast-blackwell.md` for the current architecture and the
+> Blackwell build/perf lessons. This draft is kept as a record of the router approach.
+
 # From One Model to Many: Running a Multi-Model LLM Router on an RTX 5090 with llama.cpp and systemd
 
 We recently upgraded our local AI inference setup on pedrogpt — a machine with an NVIDIA RTX 5090 (32GB VRAM) and 64GB of system RAM — from running a single hardcoded model to a full multi-model router. Five models, one server process, zero restarts to switch between them. Here's how we did it.
