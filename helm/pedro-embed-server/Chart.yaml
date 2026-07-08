@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pedro-embed-server
+description: CPU vllm embedding server for mempalace and FAQ
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

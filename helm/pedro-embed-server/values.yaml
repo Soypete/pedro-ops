@@ -1,0 +1,44 @@
+replicaCount: 1
+
+image:
+  repository: vllm/vllm-openai
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8081
+
+# Embedding model configuration
+model:
+  name: nomic-ai/nomic-embed-text-v1.5
+  dtype: float16
+  maxModelLen: 2048
+
+resources:
+  requests:
+    cpu: 2
+    memory: 4Gi
+  limits:
+    cpu: 4
+    memory: 8Gi
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8081
+  initialDelaySeconds: 30
+  periodSeconds: 60
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8081
+  initialDelaySeconds: 10
+  periodSeconds: 30
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
