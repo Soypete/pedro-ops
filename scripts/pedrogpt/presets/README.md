@@ -38,12 +38,12 @@ the MTP head and a q8_0 KV cache.
 
 | Setting | Value | Why |
 |---------|-------|-----|
-| `-ngl -1` | all layers on GPU | dense 27B fits fully; any CPU layer tanks throughput |
+| `-ngl 99` | all layers on GPU | dense 27B fits fully; any CPU layer tanks throughput |
 | `-fa on` | flash attention | faster + prerequisite for KV-cache quantization |
 | `--cache-type-k/v q8_0` | quantized KV | ~halves KV VRAM; **K and V must match** or attention falls back to a slow path |
 | `-ub 1024` | micro-batch | larger ubatch improves prefill; safe on a 5090 |
 | `-np 1` | single slot | **required** by MTP |
-| `--spec-type draft-mtp --spec-draft-n-max 2` | enable MTP | self-speculative decoding, ~1.4–2.2x, no quality loss |
+| `--spec-type draft-mtp --spec-draft-n-max 3` | enable MTP | self-speculative decoding, ~1.4–2.2x, no quality loss |
 
 > Confirm the exact spec-type spelling for your build: `llama-server --help | grep -i spec`.
 > Some builds spell it `mtp` rather than `draft-mtp`.

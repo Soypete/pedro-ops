@@ -17,12 +17,7 @@ EXTRA_ARGS=()
 
 # MTP self-speculative decoding (no separate draft model — the head is in the GGUF).
 if [[ -n "${SPEC_TYPE:-}" ]]; then
-  EXTRA_ARGS+=(--spec-type "${SPEC_TYPE}" --spec-draft-n-max "${SPEC_DRAFT_N:-2}")
-  # Draft-head KV cache quantization — match the main KV cache unless overridden.
-  if [[ -n "${CACHE_TYPE_K:-}" ]]; then
-    EXTRA_ARGS+=(--cache-type-k-draft "${CACHE_TYPE_K_DRAFT:-$CACHE_TYPE_K}" \
-                 --cache-type-v-draft "${CACHE_TYPE_V_DRAFT:-${CACHE_TYPE_V:-$CACHE_TYPE_K}}")
-  fi
+  EXTRA_ARGS+=(--spec-type "${SPEC_TYPE}" --spec-draft-n-max "${SPEC_DRAFT_N:-3}")
 fi
 
 # Quantized KV cache (requires flash-attn; K and V must match).
@@ -43,8 +38,8 @@ exec /opt/llama.cpp/build/bin/llama-server \
     --port "${PORT:-8000}" \
     -m "${MODEL}" \
     --alias "${MODEL_ALIAS:-qwen3.6-27b-mtp}" \
-    --ctx-size "${N_CTX:-216064}" \
-    --n-gpu-layers "${N_GPU_LAYERS:--1}" \
+    --ctx-size "${N_CTX:-65536}" \
+    --n-gpu-layers "${N_GPU_LAYERS:-99}" \
     --parallel "${N_PARALLEL:-1}" \
     --batch-size "${BATCH:-2048}" \
     --ubatch-size "${UBATCH:-1024}" \

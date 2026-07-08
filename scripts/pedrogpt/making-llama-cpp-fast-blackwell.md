@@ -68,7 +68,7 @@ sequentially — that's no cost at all, so we dedicated the box to a single MTP 
    ```
 3. **Add the two flags** (start at 2, try 3; higher only helps while acceptance stays high):
    ```
-   --spec-type draft-mtp --spec-draft-n-max 2
+   --spec-type draft-mtp --spec-draft-n-max 3
    ```
 
 When it's working you'll see the draft context initialize in the logs:
@@ -78,7 +78,7 @@ srv  load_model: [spec] estimated memory usage of MTP context is 520.03 MiB
 common_speculative_impl_draft_mtp: adding speculative implementation 'draft-mtp'
 common_speculative_impl_draft_mtp: - n_max=3, n_min=0, p_min=0.00, n_embd=5120
 srv  load_model: speculative decoding context initialized
-srv  server is listening on http://0.0.0.0:8080
+srv  server is listening on http://0.0.0.0:8000
 ```
 
 ### The gotcha that cost us: `--embeddings` is incompatible with the MTP graph
@@ -172,21 +172,21 @@ Here's the full tuned launch for a dense 27B on a 32 GB 5090, with the reasoning
 
 ```bash
 llama-server \
-  -m /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-UD-Q4_K_XL.gguf \
+  -m /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-MTP-UD-Q4_K_XL.gguf \
   --alias qwen3.6-27b-mtp --host 0.0.0.0 --port 8000 \
-  -ngl -1 \
-  -c 216064 \
+  -ngl 99 \
+  -c 65536 \
   -fa on \
   --cache-type-k q8_0 --cache-type-v q8_0 \
   -b 2048 -ub 1024 \
   -np 1 \
   --mlock --jinja \
-  --spec-type draft-mtp --spec-draft-n-max 2 \
+  --spec-type draft-mtp --spec-draft-n-max 3 \
   --temp 0.7 --top-k 20 --top-p 0.8 --presence-penalty 1.5 --min-p 0.0 \
   --chat-template-kwargs '{"enable_thinking":false}'
 ```
 
-- **`-ngl -1` (offload everything).** Put *all* layers on the GPU. Our UD-Q4_K_XL weights are ~17.9 GB
+- **`-ngl 99` (offload everything).** Put *all* layers on the GPU. Our UD-Q4_K_XL weights are ~17.9 GB
   on a 32 GB card — it fits fully, so there's no reason to leave any layer on the CPU. Even a few CPU
   layers tank throughput, because every token has to traverse them single-threaded. (This is the same
   lesson we learned the hard way earlier: a manual `-ngl 35` once cost us a 10x slowdown.)
@@ -262,7 +262,7 @@ Two honest caveats:
 
 1. **MTP is a genuinely free speedup** for single-stream serving: same outputs (drafts that don't
    match are discarded), ~1.4–2.2x faster, no second model to manage — as long as you can live with
-   `--parallel 1`. Enable it with `--spec-type draft-mtp --spec-draft-n-max 2` on an MTP GGUF.
+   `--parallel 1`. Enable it with `--spec-type draft-mtp --spec-draft-n-max 3` on an MTP GGUF.
 2. **MTP and `--embeddings` don't mix** on this model — the embeddings graph crashes the server on
    load. Make the box chat-only and serve embeddings from a separate process.
 3. **On a new GPU, suspect the build (and driver) before the model.** Wrong arch, wrong CUDA major
