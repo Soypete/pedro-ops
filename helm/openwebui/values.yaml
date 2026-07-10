@@ -1,0 +1,130 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/open-webui/open-webui
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Database - Supabase with pgvector
+databaseUrl: ""
+
+# Redis - use existing
+redis:
+  enabled: false
+
+websocket:
+  enabled: true
+  manager: redis
+
+# Ollama - disabled, using external pedrogpt
+ollama:
+  enabled: false
+
+# Tika for document extraction
+tika:
+  enabled: true
+
+# Pipelines
+pipelines:
+  enabled: true
+  persistence:
+    enabled: false
+
+# Storage - SeaweedFS S3
+persistence:
+  enabled: true
+  provider: s3
+  s3:
+    bucket: openwebui
+    region: us-east-1
+    accessKeyExistingSecret: openwebui-secrets
+    accessKeyExistingAccessKey: AWS_ACCESS_KEY_ID
+    secretKeyExistingSecret: openwebui-secrets
+    secretKeyExistingSecretKey: AWS_SECRET_ACCESS_KEY
+    endpointUrl: "http://seaweedfs-s3:8332"
+
+# OpenWebUI configuration
+extraEnvVars:
+  - name: WEBUI_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: openwebui-secrets
+        key: WEBUI_SECRET_KEY
+  - name: OPENAI_API_BASE_URL
+    value: "http://100.121.229.114:8000/v1"
+  - name: OPENAI_API_KEY
+    value: "stub-key-for-local-ollama"
+  - name: VECTOR_DB
+    value: "pgvector"
+  - name: PGVECTOR_DB_URL
+    valueFrom:
+      secretKeyRef:
+        name: openwebui-secrets
+        key: DATABASE_URL
+        optional: true
+  - name: ENABLE_DB_MIGRATIONS
+    value: "true"
+  - name: DEFAULT_LOCALE
+    value: "en"
+  - name: WEBUI_URL
+    value: "http://ai.tail6fbc5.ts.net"
+  - name: WEBUI_NAME
+    value: "PedroGPT UI"
+  - name: ENABLE_TOOL_WEBSEARCH
+    value: "true"
+  - name: WEBSEARCH_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: openwebui-secrets
+        key: WEBSEARCH_API_KEY
+        optional: true
+  - name: WEBSEARCH_ENGINE
+    value: "ddg"
+  - name: ENABLE_AUDIO_TTS
+    value: "true"
+  - name: ENABLE_AUDIO_WHISPER
+    value: "true"
+  - name: WHISPER_API_URL
+    value: "http://whisper:9000"
+  - name: RAG_EMBEDDING_ENGINE
+    value: "openai"
+  - name: RAG_EMBEDDING_MODEL
+    value: "text-embedding-3-small"
+  - name: ENABLE_SIGNUP
+    value: "false"
+  - name: ENABLE_PGvector
+    value: "false"
+  - name: OLLAMA_BASE_URLS
+    value: ""
+  - name: ENABLE_OLLAMA_API
+    value: "false"
+
+# No ingress - we'll use Tailscale
+ingress:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: 8080
+  initialDelaySeconds: 60
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
