@@ -1,0 +1,29 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: openwebui-db
+  namespace: openwebui
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+  enableSuperuserAccess: true
+
+  storage:
+    storageClass: longhorn
+    size: 10Gi
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+  bootstrap:
+    initdb:
+      database: openwebui
+      owner: postgres
+      postInitSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector;
+        - ALTER USER postgres WITH PASSWORD 'PMy8GF6KuomeWdqYef6FE0F6pKgrVb8vw9jcQrJwBfkiWZD0f5LygsRhdEuNf7lB';

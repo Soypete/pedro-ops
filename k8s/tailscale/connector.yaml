@@ -4,7 +4,6 @@ metadata:
   name: gpu-inference-connector
   namespace: tailscale
 spec:
-  # Tag this connector with the pedro-ops tag
   tags:
     - tag:k8s-pedro-ops
 

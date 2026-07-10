@@ -599,6 +599,20 @@ To achieve full HA:
 - Network bandwidth limited by physical network
 - Control plane is not HA (single node)
 
+## Helm Chart Guidelines
+
+### Node Scheduling
+**Do not use `nodeSelector` to restrict pods to control-plane nodes.** Our cluster has:
+- 1 control-plane node (blue1): 4 cores, 16GB RAM
+- 2 worker nodes (blue2, refurb): 4 and 8 cores respectively
+
+The control-plane node is not specially provisioned for GPU workloads. All worker nodes have sufficient resources. Using `nodeSelector: node-role.kubernetes.io/control-plane: "true"` will:
+- Fail to schedule due to resource constraints
+- Prevent workload distribution across the cluster
+- Create unnecessary contention with infrastructure services
+
+**Correct approach:** Let the scheduler decide based on available resources. Only use nodeSelector when a specific node attribute is required (e.g., dedicated GPU nodes, specific storage).
+
 ## Technology Decisions
 
 ### Why K3s?
