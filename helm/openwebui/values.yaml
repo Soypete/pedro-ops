@@ -12,9 +12,12 @@ service:
 # Database - Supabase with pgvector
 databaseUrl: ""
 
-# Redis - use existing
+# Redis - bundled subchart of open-webui, used as the websocket message broker.
+# Must stay enabled while websocket.manager is "redis"; setting this false
+# points websockets at a Redis that is never deployed.
+# (For a single replica you could instead set manager: "" for the in-memory manager.)
 redis:
-  enabled: false
+  enabled: true
 
 websocket:
   enabled: true
@@ -45,7 +48,10 @@ persistence:
     accessKeyExistingAccessKey: AWS_ACCESS_KEY_ID
     secretKeyExistingSecret: openwebui-secrets
     secretKeyExistingSecretKey: AWS_SECRET_ACCESS_KEY
-    endpointUrl: "http://seaweedfs-s3:8332"
+    # Port is 8333 (svc seaweedfs-s3 port name 'swfs-s3'). Was 8332 since the
+    # original commit, which never matched the live service.
+    # FQDN so this resolves from the openwebui namespace.
+    endpointUrl: "http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333"
 
 # OpenWebUI configuration
 extraEnvVars:
@@ -98,10 +104,11 @@ extraEnvVars:
     value: "false"
   - name: ENABLE_PGvector
     value: "false"
-  - name: OLLAMA_BASE_URLS
-    value: ""
-  - name: ENABLE_OLLAMA_API
-    value: "false"
+  # OLLAMA_BASE_URLS / ENABLE_OLLAMA_API are set by the chart itself from
+  # `ollama.enabled: false` above. Re-declaring them here produced:
+  #   "hides previous definition of ENABLE_OLLAMA_API, which may be dropped
+  #    when using apply"
+  # Leave them to the chart -- inference goes to OPENAI_API_BASE_URL instead.
 
 # No ingress - we'll use Tailscale
 ingress:
