@@ -7,6 +7,14 @@ spec:
   instances: 2
   imageName: ghcr.io/cloudnative-pg/postgresql:16.4
   enableSuperuserAccess: true
+  # Superuser credentials come from a Secret, never from this manifest.
+  # Create it out-of-band (see docs/manual-changes-2026-08-03.md):
+  #   kubectl -n openwebui create secret generic openwebui-db-superuser \
+  #     --type=kubernetes.io/basic-auth \
+  #     --from-literal=username=postgres \
+  #     --from-literal=password="$(openssl rand -base64 36)"
+  superuserSecret:
+    name: openwebui-db-superuser
 
   storage:
     storageClass: longhorn
@@ -26,4 +34,5 @@ spec:
       owner: postgres
       postInitSQL:
         - CREATE EXTENSION IF NOT EXISTS vector;
-        - ALTER USER postgres WITH PASSWORD 'PMy8GF6KuomeWdqYef6FE0F6pKgrVb8vw9jcQrJwBfkiWZD0f5LygsRhdEuNf7lB';
+        # NOTE: do NOT set the superuser password here -- CNPG manages it from
+        # superuserSecret above. A password in this manifest lands in git.

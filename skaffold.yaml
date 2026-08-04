@@ -1,0 +1,84 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: pedro-ops
+
+# Declarative deploy definition for the cluster's application stack.
+#
+# SCOPE / HONESTY NOTE: this repo builds no images -- every workload here uses an
+# upstream chart or a prebuilt image from the Zot registry. So there is no
+# `build:` stanza and no file-watch dev loop worth running. Skaffold is used
+# purely as a declarative "deploy these releases in this order" manifest, which
+# duplicates scripts/deploy-openwebui.sh in a form other tools can consume.
+#
+# The scripts remain the source of truth for a rebuild, because they do things
+# Skaffold cannot express: generating secrets, creating S3 buckets, waiting on
+# the CNPG Cluster CR, installing pgvector, and reconciling the superuser
+# password. Prefer:
+#
+#   ./scripts/deploy-openwebui.sh
+#
+# Skaffold has NOT been validated against this cluster (skaffold is not
+# installed on the admin machine as of 2026-08-03). Treat the profiles below as
+# a starting point to verify, not a proven path.
+#
+# Usage once skaffold is installed:
+#   skaffold deploy -p openwebui       # requires secrets + buckets to exist
+#   skaffold deploy -p infra
+
+profiles:
+  # ---------------------------------------------------------------------------
+  # Cluster prerequisites that application charts depend on.
+  # ---------------------------------------------------------------------------
+  - name: infra
+    deploy:
+      helm:
+        releases:
+          - name: cnpg
+            repo: https://cloudnative-pg.github.io/charts
+            remoteChart: cloudnative-pg
+            namespace: cnpg-system
+            createNamespace: true
+            wait: true
+
+  # ---------------------------------------------------------------------------
+  # OpenWebUI stack. Redis, Tika and pipelines are subcharts of open-webui and
+  # are enabled through helm/openwebui/values.yaml -- they are not separate
+  # releases.
+  #
+  # PREREQUISITES not handled here (use scripts/deploy-openwebui.sh):
+  #   - secrets: openwebui-db-superuser, openwebui-secrets
+  #   - S3 buckets: openwebui, openwebui-pg
+  #   - the openwebui-db CNPG Cluster CR + pgvector extension
+  # ---------------------------------------------------------------------------
+  - name: openwebui
+    manifests:
+      rawYaml:
+        - k8s/openwebui/postgres.yaml
+    deploy:
+      helm:
+        releases:
+          - name: openwebui
+            repo: https://helm.openwebui.com
+            remoteChart: open-webui
+            namespace: openwebui
+            createNamespace: true
+            valuesFiles:
+              - helm/openwebui/values.yaml
+            wait: true
+
+  # ---------------------------------------------------------------------------
+  # Embedding server. Public image, no registry dependency, so this one is
+  # genuinely standalone.
+  # ---------------------------------------------------------------------------
+  - name: embed
+    deploy:
+      helm:
+        releases:
+          - name: pedro-embed-server
+            chartPath: helm/pedro-embed-server
+            namespace: chatbot
+            createNamespace: true
+            valuesFiles:
+              - helm/pedro-embed-server/values.yaml
+            wait: true
