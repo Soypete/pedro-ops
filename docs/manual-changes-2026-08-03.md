@@ -281,6 +281,112 @@ Until this is done `loki-0` stays in CrashLoopBackOff on `init compactor: failed
 
 ---
 
+## 3b. Tailscale operator — installed, blocked on expired OAuth credentials
+
+The manifest for `https://ai.tail6fbc5.ts.net` **already existed** and is correct:
+`k8s/tailscale/openwebui-ingress.yaml` targets `ai.tail6fbc5.ts.net` with backend
+`openwebui-open-webui:8080`. It could not work because the operator was absent — there was no
+`tailscale` IngressClass for it to bind to.
+
+Installed the operator (`tailscale/tailscale-operator` into ns `tailscale`, credentials read
+from 1Password items `TS_CLIENT_ID` / `TS_CLIENT_SECRET`). The CRDs and IngressClass registered
+successfully:
+
+```
+NAME        CONTROLLER
+tailscale   tailscale.com/ts-ingress
++ connectors, dnsconfigs, proxyclasses, proxygroups, recorders, tailnets .tailscale.com
+```
+
+**But the operator cannot authenticate.** It crashlooped with:
+
+```
+creating operator authkey: Post "https://controlplane.tailscale.com/api/v2/tailnet/-/keys":
+oauth2: cannot fetch token: 401 Unauthorized
+Response: {"message":"API token invalid"}
+```
+
+Verified independently against Tailscale's own endpoint — not a cluster or config problem:
+
+```
+$ curl -X POST https://api.tailscale.com/api/v2/oauth/token \
+    -d client_id=... -d client_secret=...
+HTTP 401
+```
+
+The stored OAuth credentials (last edited ~5 months ago) have been **revoked or expired**.
+
+The operator Deployment was **scaled to 0** to avoid a permanent crashloop. CRDs and the
+IngressClass remain installed, so applying the ingress manifests now would leave them pending
+rather than failing admission.
+
+### To finish
+
+1. Mint new OAuth credentials at https://login.tailscale.com/admin/settings/oauth
+   (scopes: `devices`, `auth_keys`; tag `tag:k8s-pedro-ops`).
+2. Update the `TS_CLIENT_ID` / `TS_CLIENT_SECRET` items in the `pedro` 1Password vault.
+3. Re-run:
+   ```bash
+   export TS_CLIENT_ID="$(op read 'op://pedro/TS_CLIENT_ID/credential')"
+   export TS_CLIENT_SECRET="$(op read 'op://pedro/TS_CLIENT_SECRET/credential')"
+   helm upgrade --install tailscale-operator tailscale/tailscale-operator -n tailscale \
+     --set oauth.clientId="$TS_CLIENT_ID" --set oauth.clientSecret="$TS_CLIENT_SECRET"
+   kubectl -n tailscale scale deploy operator --replicas=1
+   kubectl apply -f k8s/tailscale/openwebui-ingress.yaml
+   ```
+4. Confirm the ingress gets an address, then browse to `https://ai.tail6fbc5.ts.net`.
+
+Note the ACL policy in `k8s/tailscale/acl-policy.json` and the `Connector` /`DNSConfig` in that
+directory also assume the pre-rebuild tailnet; re-check them once the operator authenticates.
+
+---
+
+## 3c. OpenBAO — correction: it survived, and now holds the OpenWebUI secrets
+
+**The audit's original "OpenBAO is gone" finding was wrong**, and
+`docs/cluster-audit-2026-08-03.md` §1.5 has been corrected. OpenBAO is a *host-level* Foundry
+component (no k8s PVC by design) and it survived the rebuild:
+
+```
+$ curl http://100.70.90.12:8200/v1/sys/health
+{"initialized": true, "sealed": false, "version": "2.0.0", "cluster_name": "vault-cluster-5896ff57"}
+
+$ foundry component status openbao
+Healthy: true   Message: healthy (initialized, unsealed)
+```
+
+The root token in `~/.foundry/openbao-keys/test/keys.json` authenticates, and the `foundry-core/`
+KV mount is intact. **No re-initialization is needed.** The error was inferring destruction from
+an absent PVC — but OpenBAO never had one, because it never ran in Kubernetes. Note the live
+address is the *old* Tailscale IP `100.70.90.12`; `100.81.89.62:8200` is dead because that host
+is gone.
+
+### New script: `scripts/sync-openwebui-secrets-to-openbao.sh`
+
+`WEBUI_SECRET_KEY` was generated at deploy time and existed **only** in a Kubernetes Secret —
+losing it invalidates every OpenWebUI session. Same exposure for the Postgres superuser password.
+These are cluster secrets, so they belong in OpenBAO.
+
+The script reads the live k8s secrets and writes them to `foundry-core/apps/openwebui` and
+`foundry-core/apps/openwebui-db`. It never reads values back out or prints them. Supports
+`DRY_RUN=1`, which has been verified:
+
+```
+[dry-run] would write foundry-core/apps/openwebui    keys: WEBUI_SECRET_KEY,DATABASE_URL,AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY
+[dry-run] would write foundry-core/apps/openwebui-db keys: username,password
+```
+
+**Not yet executed against OpenBAO** — the write uses the root token, so run it yourself:
+
+```bash
+export KUBECONFIG=~/.foundry/kubeconfig
+./scripts/sync-openwebui-secrets-to-openbao.sh
+```
+
+Prefer a scoped token via `$VAULT_TOKEN` over the root token for routine use.
+
+---
+
 ## 4. Validation performed
 
 ```bash

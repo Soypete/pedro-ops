@@ -121,7 +121,34 @@ InternalError: We encountered an internal error, please try again. status code: 
 Purge the stale filer metadata (or recreate the `loki`/`velero` buckets) so the filer matches the
 empty volume store. Loki will not start until this is resolved.
 
-### 1.5 OpenBAO: keys survived, data did not — and it was never in-cluster
+### 1.5 OpenBAO — CORRECTED: alive and healthy on 100.70.90.12
+
+> **CORRECTION (same day).** The original finding below said OpenBAO's data was destroyed.
+> **That was wrong.** OpenBAO is a *host-level* Foundry component (`foundry component list`
+> shows it with no dependencies, like Zot) and it **survived the rebuild** on the old host:
+>
+> ```
+> $ curl http://100.70.90.12:8200/v1/sys/health
+> {"initialized": true, "sealed": false, "version": "2.0.0", ...}
+> $ foundry component status openbao
+> Healthy: true   Message: healthy (initialized, unsealed)
+> ```
+>
+> The stored root token at `~/.foundry/openbao-keys/test/keys.json` authenticates
+> successfully, and the `foundry-core/` KV mount is intact.
+>
+> The error was inferring destruction from the absent PVC — but OpenBAO never had a PVC,
+> because it never ran in Kubernetes. Only the *injector* is in-cluster, and it points at
+> `externalVaultAddr: http://100.70.90.12:8200`, which is correct and reachable.
+>
+> **What is still true:** only the injector is deployed in-cluster, `100.81.89.62:8200` is
+> dead (that host is gone), and no in-cluster workload can currently use injection until the
+> injector's config is confirmed against the surviving server.
+
+<details>
+<summary>Original (incorrect) finding, kept for the record</summary>
+
+#### OpenBAO: keys survived, data did not — and it was never in-cluster
 
 The assumption that OpenBAO is intact does not hold, though the conclusion is better than feared.
 
@@ -147,6 +174,12 @@ entirely new share set.
 **The real recovery path is 1Password**, which is the documented source of truth. This is
 re-initialize-and-repopulate, not unseal-and-recover. Archive the old `keys.json` before anything
 overwrites it.
+
+</details>
+
+**Do not act on the collapsed section above** — no re-initialization is needed. OpenBAO is
+healthy and holds its existing data. Use `scripts/sync-openwebui-secrets-to-openbao.sh` to push
+cluster secrets into it.
 
 ---
 
