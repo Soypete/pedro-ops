@@ -78,7 +78,7 @@ export TS_CLIENT_SECRET="your_client_secret"
 ./scripts/phase4-install-tailscale.sh
 
 # Configure kubectl access
-export KUBECONFIG=~/.kube/pedro-ops-config
+export KUBECONFIG=~/.foundry/kubeconfig
 kubectl get nodes
 ```
 
@@ -123,7 +123,7 @@ pedro-ops/
 
 ```bash
 # Set kubeconfig
-export KUBECONFIG=~/.kube/pedro-ops-config
+export KUBECONFIG=~/.foundry/kubeconfig
 
 # View nodes
 kubectl get nodes -o wide

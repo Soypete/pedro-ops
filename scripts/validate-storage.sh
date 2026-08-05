@@ -20,7 +20,7 @@ NC='\033[0m'
 if ! kubectl get nodes &>/dev/null; then
     echo -e "${RED}Cannot access Kubernetes cluster!${NC}"
     echo "Make sure kubeconfig is set:"
-    echo "  export KUBECONFIG=~/.kube/pedro-ops-config"
+    echo "  export KUBECONFIG=~/.foundry/kubeconfig"
     exit 1
 fi
 

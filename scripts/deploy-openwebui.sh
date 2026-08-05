@@ -12,6 +12,7 @@ set -euo pipefail
 #   6. openwebui-db Cluster CR     (kubectl -- CNPG has no chart for a database)
 #   7. pgvector extension
 #   8. OpenWebUI + Redis + Tika + pipelines (helm, upstream chart)
+#   9. Tailscale ingress           (kubectl -- exposes ai.tail6fbc5.ts.net)
 #
 # Idempotent: safe to re-run, and safe to run against a freshly rebuilt cluster.
 # Existing secrets are NOT overwritten, so re-running will not rotate credentials
@@ -32,6 +33,8 @@ NAMESPACE="${OPENWEBUI_NAMESPACE:-openwebui}"
 RELEASE="${OPENWEBUI_RELEASE:-openwebui}"
 VALUES="${REPO_ROOT}/helm/openwebui/values.yaml"
 PG_MANIFEST="${REPO_ROOT}/k8s/openwebui/postgres.yaml"
+INGRESS_MANIFEST="${REPO_ROOT}/k8s/tailscale/openwebui-ingress.yaml"
+INGRESS_FQDN="ai.tail6fbc5.ts.net"
 PG_CLUSTER="openwebui-db"
 PG_SECRET="openwebui-db-superuser"
 APP_SECRET="openwebui-secrets"
@@ -232,17 +235,51 @@ fi
 echo ""
 
 # --- 8. openwebui ----------------------------------------------------------
-echo "[8/8] OpenWebUI (+ Redis, Tika, pipelines)..."
+echo "[8/9] OpenWebUI (+ Redis, Tika, pipelines)..."
 helm upgrade --install "$RELEASE" open-webui/open-webui \
     -n "$NAMESPACE" -f "$VALUES" --wait --timeout 10m >/dev/null
 ok "helm release deployed"
+echo ""
+
+# --- 9. tailscale ingress --------------------------------------------------
+# The chart's own ingress stays disabled (ingress.enabled=false); exposure is
+# via the Tailscale operator, which needs a separate Ingress with
+# ingressClassName: tailscale. Without this the app is ClusterIP-only.
+#
+# Do NOT add a tailscale.com/tags annotation to that manifest -- the operator
+# applies its own PROXY_TAGS, and requesting a tag the tailnet does not own
+# (e.g. the removed tag:k8s-pedro-ops) makes node authentication fail.
+echo "[9/9] Tailscale ingress..."
+kubectl apply -f "$INGRESS_MANIFEST" >/dev/null
+ok "ingress applied"
+
+# The operator provisions a proxy StatefulSet and then writes the FQDN back to
+# the ingress status. Poll for it so the script fails loudly if that stalls.
+INGRESS_NAME="$(kubectl -n "$NAMESPACE" get ingress -o jsonpath='{.items[?(@.spec.ingressClassName=="tailscale")].metadata.name}' 2>/dev/null | awk '{print $1}')"
+ADDR=""
+for _ in $(seq 1 30); do
+    ADDR="$(kubectl -n "$NAMESPACE" get ingress "$INGRESS_NAME" \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+    [ -n "$ADDR" ] && break
+    sleep 5
+done
+
+if [ -n "$ADDR" ]; then
+    ok "exposed at https://${ADDR}/"
+    if [ "$ADDR" != "$INGRESS_FQDN" ]; then
+        warn "expected ${INGRESS_FQDN} -- a stale tailnet node may still hold that name"
+    fi
+else
+    warn "no address yet; check: kubectl logs -n tailscale deploy/operator"
+fi
 echo ""
 
 echo -e "${GREEN}=== Deployment complete ===${NC}"
 echo ""
 kubectl -n "$NAMESPACE" get pods
 echo ""
-echo "Access (no ingress -- ingress.enabled=false, Tailscale was the intended path):"
+echo "Access:"
+echo "  https://${ADDR:-$INGRESS_FQDN}/"
 echo "  kubectl -n ${NAMESPACE} port-forward svc/${RELEASE}-open-webui 8080:8080"
 echo ""
 echo "NOTE: this cluster has NO backup for ${PG_CLUSTER}. See issue #13."
