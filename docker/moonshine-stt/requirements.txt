@@ -1,0 +1,6 @@
+# Pinned deliberately: this image is rebuilt rarely and must be reproducible.
+# Bump intentionally, then re-run the smoke test in RUNBOOK.md.
+moonshine-voice==0.1.0
+fastapi==0.141.1
+uvicorn==0.52.1
+python-multipart==0.0.32

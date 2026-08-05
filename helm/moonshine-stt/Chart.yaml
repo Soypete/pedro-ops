@@ -1,0 +1,10 @@
+apiVersion: v2
+name: moonshine-stt
+description: Moonshine v2 speech-to-text served over the OpenAI audio API (CPU-only)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - speech-to-text
+  - moonshine
+  - openai-compatible

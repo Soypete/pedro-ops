@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "moonshine-stt.fullname" . }}
+  labels:
+    {{- include "moonshine-stt.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "moonshine-stt.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "moonshine-stt.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        # The model weights are baked into the image, but moonshine-voice uses
+        # filelock and writes a sibling .lock file next to each weight before
+        # reading it -- which fails under readOnlyRootFilesystem. Copy the cache
+        # onto a writable emptyDir so the rootfs stays read-only.
+        # No network access: this is a local copy, not a download.
+        - name: seed-model-cache
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command:
+            - sh
+            - -c
+            # cp -r, not -a: preserving timestamps onto the emptyDir mount root
+            # fails with "Operation not permitted", and mtimes are irrelevant
+            # for read-only model weights.
+            - cp -r /home/moonshine/.cache/. /model-cache/ && echo "model cache seeded"
+          volumeMounts:
+            - name: model-cache
+              mountPath: /model-cache
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+      containers:
+        - name: moonshine-stt
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: MOONSHINE_MODEL
+              value: {{ .Values.model.name | quote }}
+            - name: MOONSHINE_LANGUAGE
+              value: {{ .Values.model.language | quote }}
+            # Point the library at the writable copy seeded by the init
+            # container (see note above).
+            - name: XDG_CACHE_HOME
+              value: /model-cache
+            {{- if .Values.auth.existingSecret }}
+            # Value lives only in the Secret; never in values.yaml or this chart.
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret }}
+                  key: {{ .Values.auth.secretKey }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          # Gates on model load: the endpoint returns 503 until Moonshine is
+          # resident, so no traffic reaches a cold pod.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # readOnlyRootFilesystem is on, but ffmpeg needs scratch space to
+            # transcode uploads.
+            - name: tmp
+              mountPath: /tmp
+            - name: model-cache
+              mountPath: /model-cache
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        # Holds the copied model cache (~160Mi for small-streaming). Bump
+        # sizeLimit if you switch to medium-streaming.
+        - name: model-cache
+          emptyDir:
+            sizeLimit: {{ .Values.modelCacheSizeLimit }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Spread replicas across nodes so one node loss does not take out STT.
+      # ScheduleAnyway: with refurb excluded there are only two eligible nodes,
+      # so this must not become a hard constraint.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "moonshine-stt.selectorLabels" . | nindent 14 }}

@@ -92,10 +92,21 @@ extraEnvVars:
     value: "ddg"
   - name: ENABLE_AUDIO_TTS
     value: "true"
-  - name: ENABLE_AUDIO_WHISPER
-    value: "true"
-  - name: WHISPER_API_URL
-    value: "http://whisper:9000"
+  # Speech-to-text via the self-hosted Moonshine v2 service (moonshine ns).
+  # Replaces ENABLE_AUDIO_WHISPER/WHISPER_API_URL, which pointed at a
+  # "whisper" service that never existed in this cluster.
+  # Engine value verified against the running image: routers/audio.py
+  # dispatches on audio.stt.engine == "openai".
+  - name: AUDIO_STT_ENGINE
+    value: "openai"
+  - name: AUDIO_STT_MODEL
+    value: "small-streaming"
+  - name: AUDIO_STT_OPENAI_API_BASE_URL
+    value: "http://moonshine-stt.moonshine.svc.cluster.local:8000/v1"
+  # Unused: the service is unauthenticated inside the cluster. Present because
+  # the OpenAI client requires a non-empty key.
+  - name: AUDIO_STT_OPENAI_API_KEY
+    value: "moonshine-local"
   - name: RAG_EMBEDDING_ENGINE
     value: "openai"
   - name: RAG_EMBEDDING_MODEL
