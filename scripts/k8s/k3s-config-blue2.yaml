@@ -2,4 +2,4 @@
 # Place at: /etc/rancher/k3s/config.yaml
 # Then restart: systemctl restart k3s-agent
 
-node-ip: 192.168.1.11
+node-ip: 192.168.1.97

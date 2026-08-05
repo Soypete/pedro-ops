@@ -69,7 +69,7 @@ kubectl port-forward -n longhorn-system svc/longhorn-frontend 7000:80
 ### OpenWebUI
 ```bash
 helm repo update
-helm upgrade openwebui open-webui/open-webui -n openwebui
+helm upgrade openwebui open-webui/open-webui --version 16.0.0 -n openwebui
 ```
 
 ### PostgreSQL (CloudNativePG)
@@ -194,6 +194,11 @@ OpenWebUI runs in the `openwebui` namespace with the following components:
 Database: CloudNativePG PostgreSQL cluster with pgvector in `openwebui` namespace.
 Storage: Longhorn volumes on Worker-1 2TB drive.
 
+`DATABASE_URL` stores primary OpenWebUI state (users, chats, settings, and API
+keys). `PGVECTOR_DB_URL` stores vector data. Both are sourced from the
+`openwebui-secrets` Secret; setting only `PGVECTOR_DB_URL` leaves primary state
+in ephemeral SQLite.
+
 ### Deploy/Update OpenWebUI
 
 ```bash
@@ -201,7 +206,7 @@ Storage: Longhorn volumes on Worker-1 2TB drive.
 vim helm/openwebui/values.yaml
 
 # Deploy/upgrade
-helm upgrade openwebui open-webui/open-webui -n openwebui -f helm/openwebui/values.yaml
+helm upgrade openwebui open-webui/open-webui --version 16.0.0 -n openwebui -f helm/openwebui/values.yaml
 
 # Verify deployment
 kubectl get pods -n openwebui
@@ -225,7 +230,7 @@ kubectl get cluster -n openwebui
 
 ```bash
 # Redis is deployed via Helm chart sub-chart
-helm upgrade openwebui open-webui/open-webui -n openwebui -f helm/openwebui/values.yaml
+helm upgrade openwebui open-webui/open-webui --version 16.0.0 -n openwebui -f helm/openwebui/values.yaml
 ```
 
 ### Connect to PostgreSQL

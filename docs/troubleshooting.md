@@ -259,12 +259,33 @@ kubectl exec -n <namespace> <pod-name> -- cat /etc/hosts
 **Diagnosis:**
 
 ```bash
+# Identify where the affected workload and CoreDNS are running
+kubectl get pods -n <namespace> -o wide
+kubectl get pods -n kube-system -l k8s-app=kube-dns -o wide
+
 # Test DNS resolution
 kubectl run test --image=nicolaka/netshoot -it --rm -- nslookup kubernetes.default.svc.cluster.local
 
 # Test connectivity to service
 kubectl run test --image=nicolaka/netshoot -it --rm -- curl http://my-service.my-namespace.svc.cluster.local
+
+# Confirm that the Service has ready backends
+kubectl get service,endpoints,endpointslices -n <namespace> <service-name> -o wide
 ```
+
+From an existing application pod, compare its DNS path with the Service IP. A
+DNS-name failure combined with a successful direct Service-IP connection means
+the application and backend are reachable and the fault is on the DNS path:
+
+```bash
+kubectl exec -n <namespace> <pod> -- getent hosts <service>.<namespace>.svc.cluster.local
+kubectl exec -n <namespace> <pod> -- nc -vz <service-cluster-ip> <port>
+```
+
+If the application and backend share a node but CoreDNS is on another node,
+same-node success plus DNS failure strongly indicates broken cross-node CNI
+traffic. Do not work around this by committing a Service IP: ClusterIPs and pod
+endpoints are implementation details that can change on a rebuild.
 
 **Solutions:**
 
@@ -287,8 +308,31 @@ kubectl run test --image=nicolaka/netshoot -it --rm -- curl http://my-service.my
 
 4. **Verify CNI (Flannel):**
    ```bash
-   kubectl get pods -n kube-system -l app=flannel
+   kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" node="}{range .status.addresses[?(@.type=="InternalIP")]}{.address}{end}{" flannel="}{.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip}{"\n"}{end}'
    ```
+
+   All Flannel endpoints must use the physical LAN:
+
+   ```text
+   blue1  node=192.168.1.185 flannel=192.168.1.185
+   blue2  node=192.168.1.97  flannel=192.168.1.97
+   refurb node=192.168.1.253 flannel=192.168.1.253
+   ```
+
+   The API VIP `10.0.0.11` must never appear as a Flannel endpoint. On
+   2026-08-05, blue1 advertised that VIP and broke cross-node pod traffic. DNS
+   appeared unhealthy because CoreDNS ran on blue1 while affected workloads ran
+   on refurb. Direct same-node Service IP connections continued to work.
+
+5. **Distinguish the DNS layers:**
+
+   - CoreDNS resolves Kubernetes names such as `*.svc.cluster.local`.
+   - PowerDNS is the Foundry `dns` component for managed/internal zones.
+   - Tailscale MagicDNS resolves tailnet machine and `*.ts.net` names.
+
+   An unhealthy `foundry stack status` DNS recursor does not by itself explain
+   failures to resolve Kubernetes Service names. Check the Flannel path to
+   CoreDNS as shown above.
 
 ### Ingress Not Working
 
