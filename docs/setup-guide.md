@@ -302,12 +302,12 @@ worker-2        Ready    <none>                 4m    v1.28.5+k3s1
 
 ```bash
 # Export kubeconfig
-export KUBECONFIG=~/.kube/pedro-ops-config
+export KUBECONFIG=~/.foundry/kubeconfig
 
 # Add to your shell profile for persistence
-echo 'export KUBECONFIG=~/.kube/pedro-ops-config' >> ~/.bashrc
+echo 'export KUBECONFIG=~/.foundry/kubeconfig' >> ~/.bashrc
 # or for zsh:
-echo 'export KUBECONFIG=~/.kube/pedro-ops-config' >> ~/.zshrc
+echo 'export KUBECONFIG=~/.foundry/kubeconfig' >> ~/.zshrc
 ```
 
 ### Step 3.3: Verify Cluster

@@ -70,7 +70,7 @@ foundry logs
 
 ```bash
 # Set kubeconfig
-export KUBECONFIG=~/.kube/pedro-ops-config
+export KUBECONFIG=~/.foundry/kubeconfig
 
 # Cluster operations
 kubectl get nodes

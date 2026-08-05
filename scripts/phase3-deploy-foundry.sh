@@ -71,8 +71,10 @@ echo ""
 
 # Get kubeconfig
 echo "[5/5] Configuring kubectl access..."
-foundry kubeconfig > ~/.kube/pedro-ops-config
-export KUBECONFIG=~/.kube/pedro-ops-config
+# foundry maintains its own kubeconfig; do not redirect to a second copy that
+# will silently go stale (see docs/manual-changes-2026-08-03.md).
+foundry kubeconfig >/dev/null 2>&1 || true
+export KUBECONFIG=~/.foundry/kubeconfig
 
 echo "Verifying cluster access..."
 kubectl get nodes -o wide
@@ -85,13 +87,13 @@ echo ""
 echo -e "${GREEN}=== Foundry Stack Deployment Complete ===${NC}"
 echo ""
 echo "Cluster Information:"
-echo "  Kubeconfig: ~/.kube/pedro-ops-config"
+echo "  Kubeconfig: ~/.foundry/kubeconfig"
 echo "  API Endpoint: https://100.81.89.100:6443"
 echo "  Domain: soypetetech.local"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
 echo "1. Verify all components:"
-echo "   export KUBECONFIG=~/.kube/pedro-ops-config"
+echo "   export KUBECONFIG=~/.foundry/kubeconfig"
 echo "   kubectl get pods -A"
 echo ""
 echo "2. Get Grafana password:"

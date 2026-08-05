@@ -272,7 +272,7 @@ fi
 
 echo ""
 print_step "Verifying cluster access..."
-export KUBECONFIG=~/.kube/pedro-ops-config
+export KUBECONFIG=~/.foundry/kubeconfig
 kubectl get nodes -o wide
 echo ""
 
@@ -283,7 +283,7 @@ echo "✓ kubectl configured"
 echo ""
 
 print_step "Cluster Information:"
-echo "  Kubeconfig: ~/.kube/pedro-ops-config"
+echo "  Kubeconfig: ~/.foundry/kubeconfig"
 echo "  API Endpoint: https://100.81.89.100:6443"
 echo "  Domain: soypetetech.local"
 echo ""
@@ -431,8 +431,8 @@ echo ""
 
 # Export kubeconfig reminder
 echo "To use kubectl, run:"
-echo "  export KUBECONFIG=~/.kube/pedro-ops-config"
+echo "  export KUBECONFIG=~/.foundry/kubeconfig"
 echo ""
 echo "Or add to your shell profile:"
-echo "  echo 'export KUBECONFIG=~/.kube/pedro-ops-config' >> ~/.bashrc"
+echo "  echo 'export KUBECONFIG=~/.foundry/kubeconfig' >> ~/.bashrc"
 echo ""
