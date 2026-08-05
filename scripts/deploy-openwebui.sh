@@ -31,6 +31,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="${OPENWEBUI_NAMESPACE:-openwebui}"
 RELEASE="${OPENWEBUI_RELEASE:-openwebui}"
+OPENWEBUI_CHART_VERSION="${OPENWEBUI_CHART_VERSION:-16.0.0}"
 VALUES="${REPO_ROOT}/helm/openwebui/values.yaml"
 PG_MANIFEST="${REPO_ROOT}/k8s/openwebui/postgres.yaml"
 INGRESS_MANIFEST="${REPO_ROOT}/k8s/tailscale/openwebui-ingress.yaml"
@@ -237,6 +238,7 @@ echo ""
 # --- 8. openwebui ----------------------------------------------------------
 echo "[8/9] OpenWebUI (+ Redis, Tika, pipelines)..."
 helm upgrade --install "$RELEASE" open-webui/open-webui \
+    --version "$OPENWEBUI_CHART_VERSION" \
     -n "$NAMESPACE" -f "$VALUES" --wait --timeout 10m >/dev/null
 ok "helm release deployed"
 echo ""

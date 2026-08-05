@@ -61,6 +61,7 @@ profiles:
           - name: openwebui
             repo: https://helm.openwebui.com
             remoteChart: open-webui
+            version: 16.0.0
             namespace: openwebui
             createNamespace: true
             valuesFiles:

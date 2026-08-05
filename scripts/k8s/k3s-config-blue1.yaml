@@ -2,8 +2,9 @@
 # Place at: /etc/rancher/k3s/config.yaml
 # Then restart: systemctl restart k3s
 #
-# IMPORTANT: node-ip must be the LAN IP, NOT 100.118.20.111 (pedro-ops-api Tailscale subnet IP).
-# If k3s picks 100.118.20.111 as node-ip, flannel binds its VXLAN VTEP to that IP which
-# routes through Tailscale from worker nodes, breaking cross-node pod networking.
+# Keep both the Kubernetes node address and Flannel's VXLAN endpoint on the
+# physical LAN. blue1 also owns the API VIP (10.0.0.11), which Flannel selected
+# automatically during the 2026-08 rebuild and broke cross-node pod traffic.
 
-node-ip: 192.168.1.128
+node-ip: 192.168.1.185
+flannel-iface: enp1s0

@@ -4,13 +4,12 @@
 # Run this after setting up a new node or if CoreDNS/registry config is lost.
 #
 # Cluster nodes (Tailscale IPs):
-#   blue1  (control plane + ZOT registry): 100.81.89.62  (LAN: 192.168.1.128)
-#   blue2  (worker):                       100.125.196.1 (LAN: 192.168.1.11)
+#   blue1  (control plane + ZOT registry): 100.81.89.62  (LAN: 192.168.1.185)
+#   blue2  (worker):                       100.125.196.1 (LAN: 192.168.1.97)
 #   refurb (worker):                       100.70.90.12  (LAN: 192.168.1.253)
 #
-# Note: blue1 also has 100.118.20.111 (pedro-ops-api Tailscale device) on enp1s0.
-# The k3s node-ip must be set to 192.168.1.128 to prevent flannel from binding to
-# 100.118.20.111 as the VXLAN VTEP, which breaks cross-node pod networking.
+# blue1 also owns the API VIP 10.0.0.11. Pinning flannel-iface prevents that VIP
+# from being advertised as its VXLAN endpoint.
 
 set -euo pipefail
 
@@ -28,9 +27,7 @@ echo "    (requires SSH access as root to blue1, blue2, refurb)"
 
 # blue1 (control plane)
 echo "    -> blue1 (100.81.89.62)"
-ssh root@100.81.89.62 "mkdir -p /etc/rancher/k3s && cat > /etc/rancher/k3s/config.yaml <<'EOF'
-node-ip: 192.168.1.128
-EOF"
+scp "$SCRIPT_DIR/k3s-config-blue1.yaml" "root@100.81.89.62:/etc/rancher/k3s/config.yaml"
 scp "$SCRIPT_DIR/registries.yaml" "root@100.81.89.62:/etc/rancher/k3s/registries.yaml"
 ssh root@100.81.89.62 "systemctl restart k3s"
 echo "    <- blue1 done (cluster will be unavailable ~30s)"
@@ -38,18 +35,14 @@ sleep 35
 
 # blue2 (worker)
 echo "    -> blue2 (100.125.196.1)"
-ssh root@100.125.196.1 "mkdir -p /etc/rancher/k3s && cat > /etc/rancher/k3s/config.yaml <<'EOF'
-node-ip: 192.168.1.11
-EOF"
+scp "$SCRIPT_DIR/k3s-config-blue2.yaml" "root@100.125.196.1:/etc/rancher/k3s/config.yaml"
 scp "$SCRIPT_DIR/registries.yaml" "root@100.125.196.1:/etc/rancher/k3s/registries.yaml"
 ssh root@100.125.196.1 "systemctl restart k3s-agent"
 echo "    <- blue2 done"
 
 # refurb (worker)
 echo "    -> refurb (100.70.90.12)"
-ssh root@100.70.90.12 "mkdir -p /etc/rancher/k3s && cat > /etc/rancher/k3s/config.yaml <<'EOF'
-node-ip: 192.168.1.253
-EOF"
+scp "$SCRIPT_DIR/k3s-config-refurb.yaml" "root@100.70.90.12:/etc/rancher/k3s/config.yaml"
 scp "$SCRIPT_DIR/registries.yaml" "root@100.70.90.12:/etc/rancher/k3s/registries.yaml"
 ssh root@100.70.90.12 "systemctl restart k3s-agent"
 echo "    <- refurb done"

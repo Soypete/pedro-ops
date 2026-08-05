@@ -2,7 +2,9 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/open-webui/open-webui
-  tag: latest
+  # Keep this immutable. `latest` + IfNotPresent reused a cached v0.10.2 image
+  # even after Helm upgraded to a chart whose appVersion was v0.11.0.
+  tag: v0.11.0
   pullPolicy: IfNotPresent
 
 service:
@@ -60,6 +62,13 @@ extraEnvVars:
       secretKeyRef:
         name: openwebui-secrets
         key: WEBUI_SECRET_KEY
+  # Primary application database: users, chats, settings, API keys, etc.
+  # Without this, OpenWebUI falls back to SQLite in the pod's ephemeral data volume.
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: openwebui-secrets
+        key: DATABASE_URL
   - name: OPENAI_API_BASE_URL
     value: "http://100.121.229.114:8000/v1"
   - name: OPENAI_API_KEY
@@ -71,7 +80,6 @@ extraEnvVars:
       secretKeyRef:
         name: openwebui-secrets
         key: DATABASE_URL
-        optional: true
   - name: ENABLE_DB_MIGRATIONS
     value: "true"
   - name: DEFAULT_LOCALE

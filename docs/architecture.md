@@ -35,6 +35,21 @@ Pedro Ops is a production-ready 3-node Kubernetes cluster built with Foundry CLI
 
 > **Note:** The cluster uses Tailscale for remote access. The Kubeconfig and node joins use the control plane's Tailscale IP (100.81.89.62), not the VIP (10.0.0.11), since the VIP is not accessible over Tailscale network.
 
+### Network planes
+
+The cluster deliberately uses separate networks for separate purposes:
+
+| Plane | Addresses | Purpose |
+|---|---|---|
+| Physical LAN | `192.168.1.185`, `.97`, `.253` | K3s node addresses and Flannel VXLAN underlay |
+| Pod network | `10.42.0.0/16` | Kubernetes pod-to-pod traffic carried by Flannel |
+| Service network | `10.43.0.0/16` | Kubernetes virtual Service IPs, including kube-dns |
+| Tailscale | `100.x.x.x` | Remote administration and selected service exposure |
+| API VIP | `10.0.0.11` | Kubernetes API endpoint only; never a Flannel endpoint |
+
+Kubernetes Service names (`*.svc.cluster.local`) are resolved by CoreDNS. The
+Foundry PowerDNS component and Tailscale MagicDNS serve different namespaces.
+
 ## Software Stack
 
 ### Core Kubernetes Layer
