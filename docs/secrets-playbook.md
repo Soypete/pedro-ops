@@ -211,6 +211,83 @@ This approach is **not recommended** because:
 - Requires 1Password connectivity from pods
 - No centralized audit trail
 
+## Kei Project Secrets
+
+### GitHub OAuth Credentials
+
+The Kei project uses GitHub OAuth for authentication. Credentials are stored in OpenBAO and injected via the OpenBAO Agent Injector.
+
+#### 1. Get credentials from 1Password
+
+```bash
+# Get GitHub Client ID
+op item get "kei_github_clientID" --vault pedro --reveal
+
+# Get GitHub OAuth Secret
+op item get "kai_github_oauth_secret" --vault pedro --reveal
+```
+
+#### 2. Store in OpenBAO
+
+```bash
+# Using kubectl with a temporary pod to access OpenBAO
+kubectl run --rm -it tmp-shell --image=busybox --restart=Never -- sh -c "
+wget -q -O - --header='X-Vault-Token: <root-token>' --header='Content-Type: application/json' \
+  --post-data='{\"data\": {\"client_id\": \"<client_id>\", \"client_secret\": \"<client_secret>\"}}' \
+  http://100.81.89.62:8200/v1/secret/data/kei/github
+"
+```
+
+Or using Foundry's OpenBAO token (stored in `~/.foundry/openbao-keys/<cluster>/keys.json`):
+
+```bash
+# Get root token
+ROOT_TOKEN=$(cat ~/.foundry/openbao-keys/test/keys.json | jq -r '.root_token')
+
+# Store secrets
+kubectl run --rm -it tmp-shell --image=busybox --restart=Never -- sh -c "
+wget -q -O - --header='X-Vault-Token: $ROOT_TOKEN' --header='Content-Type: application/json' \
+  --post-data='{\"data\": {\"client_id\": \"Ov23liJn1c5XbeACMmKA\", \"client_secret\": \"<secret>\"}}' \
+  http://100.81.89.62:8200/v1/secret/data/kei/github
+"
+```
+
+#### 3. Enable namespace for injection
+
+By default, the OpenBAO injector ignores certain namespaces. Enable it for kei:
+
+```bash
+kubectl annotate namespace kei openbao.hashicorp.com/webhook-ignore-namespaces=false --overwrite
+```
+
+#### 4. Add annotations to deployment
+
+In `k8s/base/oidc-bridge/deployment.yaml`:
+
+```yaml
+template:
+  metadata:
+    annotations:
+      openbao.hashicorp.com/agent-inject: "true"
+      openbao.hashicorp.com/role: "kei"
+      openbao.hashicorp.com/agent-inject-secret-github: "secret/data/kei/github"
+      openbao.hashicorp.com/agent-inject-template-github: |
+        {{- with secret "secret/data/kei/github" -}}
+        export GITHUB_CLIENT_ID="{{ .Data.data.client_id }}"
+        export GITHUB_CLIENT_SECRET="{{ .Data.data.client_secret }}"
+        {{- end }}
+```
+
+#### 5. Create GitHub OAuth App
+
+Go to https://github.com/settings/developers and create a new OAuth app:
+
+- **Application name**: kei
+- **Homepage URL**: `https://kei-web-ingress.tail6fbc5.ts.net`
+- **Authorization callback URL**: `https://kei-web-ingress.tail6fbc5.ts.net/auth/callback`
+
+Use the client ID and secret from 1Password (step 1) when creating the app.
+
 ## References
 
 - [OpenBAO Agent Injector](https://developer.hashicorp.com/vault/docs/platform/k8s/injector)

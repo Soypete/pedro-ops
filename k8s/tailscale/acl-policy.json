@@ -1,48 +1,81 @@
 {
-  "// NOTE": "This is an example ACL policy for Tailscale admin console",
-  "// Instructions": "Copy this content to Tailscale admin console → Access Controls",
+  "// NOTE": "Mirror of the live Tailscale ACL policy. Edit in the admin console (Access Controls), then sync here.",
+  "// FORMAT": "The console accepts HuJSON (comments + trailing commas); this file is strict JSON so repo tooling can parse it.",
 
-  "tagOwners": {
-    "tag:k8s-operator": [],
-    "tag:k8s-pedro-ops": ["tag:k8s-operator"],
-    "tag:gpu-inference": []
+  "groups": {
+    "group:personal": [
+      "captainnobody1@gmail.com",
+      "Caleb@bclife.biz",
+      "obrien.colin009@gmail.com",
+      "davidbosnic99@gmail.com"
+    ]
   },
 
-  "grants": [
-    {
-      "src": ["tag:k8s-operator"],
-      "dst": ["tag:k8s-pedro-ops"],
-      "op": "is-owner"
-    }
-  ],
+  "hosts": {
+    "raspberryPi": "100.93.172.103",
+    "pi4": "100.76.13.90",
+    "windows": "100.89.139.55"
+  },
 
   "acls": [
     {
       "action": "accept",
-      "src": ["tag:k8s-pedro-ops"],
-      "dst": ["tag:gpu-inference:*"],
-      "comment": "Allow pedro-ops cluster to connect to GPU inference machine"
-    },
-    {
-      "action": "accept",
-      "src": ["tag:gpu-inference"],
-      "dst": ["tag:k8s-pedro-ops:*"],
-      "comment": "Allow GPU machine to connect back to cluster"
-    },
-    {
-      "action": "accept",
-      "src": ["autogroup:admin"],
-      "dst": ["*:*"],
-      "comment": "Admins can access everything"
+      "users": ["*"],
+      "ports": ["*:*"]
     }
   ],
 
   "ssh": [
     {
+      "action": "check",
+      "src": ["autogroup:members"],
+      "dst": ["autogroup:self"],
+      "users": ["ubuntu", "root", "miriahpeterson", "soypete"],
+      "checkPeriod": "20h"
+    },
+    {
       "action": "accept",
-      "src": ["autogroup:admin"],
-      "dst": ["tag:k8s-pedro-ops", "tag:gpu-inference"],
-      "users": ["root", "autogroup:nonroot"]
+      "src": ["group:personal", "autogroup:members"],
+      "dst": ["tag:k8s"],
+      "users": ["ubuntu", "root", "soypete", "rojuinex"]
+    },
+    {
+      "action": "accept",
+      "src": ["tag:k8s"],
+      "dst": ["tag:k8s"],
+      "users": ["root"]
+    }
+  ],
+
+  "tagOwners": {
+    "tag:prod": ["group:personal"],
+    "tag:production": ["group:personal"],
+    "tag:k8s-operator": ["group:personal", "tag:k8s-operator"],
+    "tag:k8s": ["tag:k8s-operator"]
+  },
+
+  "grants": [
+    {
+      "src": ["*"],
+      "dst": ["tag:k8s-operator"],
+      "ip": ["tcp:443"]
+    }
+  ],
+
+  "autoApprovers": {
+    "services": {
+      "tag:k8s": ["tag:k8s"]
+    }
+  },
+
+  "nodeAttrs": [
+    {
+      "target": ["tag:k8s"],
+      "attr": ["funnel"]
+    },
+    {
+      "target": ["100.71.226.113"],
+      "attr": ["funnel"]
     }
   ]
 }
