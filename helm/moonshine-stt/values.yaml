@@ -1,0 +1,96 @@
+replicaCount: 2
+
+image:
+  repository: 100.81.89.62:5000/moonshine-stt
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# Model baked into the image at build time. Changing this alone does NOT
+# change the served model -- rebuild the image with a matching
+# --build-arg MOONSHINE_MODEL, then bump image.tag. See RUNBOOK.md.
+model:
+  name: small-streaming
+  language: en
+
+# Weights are baked into the image but must be copied to a writable volume:
+# moonshine-voice writes .lock files beside them, which readOnlyRootFilesystem
+# forbids. small-streaming is ~160Mi; raise this for medium-streaming.
+modelCacheSizeLimit: 512Mi
+
+service:
+  type: ClusterIP
+  port: 8000
+
+# Measured on this cluster (see RUNBOOK.md): a single transcription pegs the
+# CPU limit, so RTF tracks the limit almost linearly. At cpu=2 RTF was ~1.0-1.7
+# (transcription takes as long as the audio); cpu=3 buys headroom on the 4-core
+# nodes without starving other workloads. Memory peaked ~535Mi, so 1Gi/2Gi is
+# generous and left alone.
+resources:
+  requests:
+    cpu: "1"
+    memory: 1Gi
+  limits:
+    cpu: "3"
+    memory: 2Gi
+
+# Model loads from local disk (baked in), but the probe is generous so a
+# slow/contended node cannot cause a restart loop during startup.
+probes:
+  readiness:
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+  liveness:
+    initialDelaySeconds: 90
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+# Optional bearer token for the API. The chart never holds the value --
+# create the Secret out-of-band (1Password -> kubectl) and name it here.
+# Leave existingSecret empty to run unauthenticated inside the cluster.
+auth:
+  existingSecret: ""
+  secretKey: API_TOKEN
+
+# Off by default: Open WebUI reaches this over cluster DNS.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls:
+    enabled: false
+    secretName: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+
+# TEMPORARY: refurb is missing /etc/rancher/k3s/registries.yaml, so it cannot
+# pull from the Zot registry ("http: server gave HTTP response to HTTPS
+# client"). This is a node defect affecting any workload pulling from
+# 100.81.89.62:5000 -- see RUNBOOK.md "Known issues" for the fix. Remove this
+# affinity block once the node is repaired.
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: NotIn
+              values: ["refurb"]
+
+extraEnv: []

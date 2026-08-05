@@ -1,0 +1,37 @@
+{{- if .Values.ingress.enabled }}
+{{- /*
+  Off by default. Open WebUI reaches this service over cluster DNS, so
+  exposing it externally is opt-in only.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "moonshine-stt.fullname" . }}
+  labels:
+    {{- include "moonshine-stt.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "moonshine-stt.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}
