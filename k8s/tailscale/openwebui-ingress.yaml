@@ -4,8 +4,10 @@ metadata:
   name: openwebui-tailscale
   namespace: openwebui
   annotations:
+    # The operator applies its own PROXY_TAGS (tag:k8s) to the proxy node.
+    # Do not set tailscale.com/tags here: tag:k8s-pedro-ops and tag:production
+    # were removed from the tailnet, and an unowned tag fails node auth.
     tailscale.com/tailnet-fqdn: ai.tail6fbc5.ts.net
-    tailscale.com/tags: tag:k8s-pedro-ops,tag:production
 spec:
   ingressClassName: tailscale
   defaultBackend:
