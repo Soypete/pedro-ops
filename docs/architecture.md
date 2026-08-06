@@ -57,12 +57,12 @@ Foundry PowerDNS component and Tailscale MagicDNS serve different namespaces.
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    K3s (Kubernetes)                      │
-│                      v1.28.x+k3s1                        │
+│                      v1.36.2+k3s1                        │
 ├─────────────────────────────────────────────────────────┤
 │  • Lightweight Kubernetes distribution                  │
-│  • Control Plane: 100.81.89.62                          │
-│  • Workers: 100.70.90.12, 100.125.196.1                 │
-│  • API Server: https://100.81.89.100:6443               │
+│  • Control Plane: blue1  100.81.89.62                    │
+│  • Workers: refurb 100.70.90.12, blue2 100.125.196.1     │
+│  • API Server: https://192.168.1.185:6443                │
 └─────────────────────────────────────────────────────────┘
 ```
 

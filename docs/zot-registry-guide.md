@@ -195,9 +195,17 @@ ssh blue1 "sudo systemctl restart k3s"
 ```
 
 ### Node Hostnames
-- **blue1**: 100.81.89.62 / 192.168.1.128 (control plane)
-- **blue2**: 100.70.90.12 / 192.168.1.11 (worker)
-- **refurb**: 100.125.196.1 / 192.168.1.253 (worker)
+
+Verified against `tailscale status` and `kubectl get nodes -o wide` on 2026-08-06:
+
+| Node | Tailscale | LAN | Role |
+|------|-----------|-----|------|
+| blue1 | 100.81.89.62 | 192.168.1.185 | control plane |
+| blue2 | 100.125.196.1 | 192.168.1.97 | worker |
+| refurb | 100.70.90.12 | 192.168.1.253 | worker |
+
+Zot itself runs on **blue1** and is reachable at `100.81.89.62:5000` and
+`192.168.1.185:5000`. Nothing listens on port 5000 on blue2 or refurb.
 
 ## Troubleshooting
 
@@ -208,10 +216,28 @@ The K3s nodes need the insecure registry configured. See [K3s Node Configuration
 After applying `registries.yaml` to each node, restart K3s:
 ```bash
 # Control plane
-ssh root@100.81.89.62 "systemctl restart k3s"
+ssh root@100.81.89.62 "systemctl restart k3s"        # blue1
 # Workers
-ssh root@100.70.90.12 "systemctl restart k3s-agent"
-ssh root@100.125.196.1 "systemctl restart k3s-agent"
+ssh root@100.125.196.1 "systemctl restart k3s-agent" # blue2
+ssh root@100.70.90.12 "systemctl restart k3s-agent"  # refurb
+```
+
+**This affects every node, including blue1.** Zot running locally does not
+help: containerd still resolves `100.81.89.62:5000` over HTTPS and fails
+before it considers the local cache.
+
+**Workaround when you cannot restart K3s** — set `imagePullPolicy: IfNotPresent`.
+Pods then use the cached image and schedule normally. With the default
+`Always`, *every* pull fails on *every* node, so a workload whose image is
+already cached still cannot start. Note that new pushes will not be picked
+up until `registries.yaml` is in place, so the cluster keeps running the
+stale image.
+
+Check whether a node has an image cached:
+```bash
+kubectl get nodes -o json | jq -r '
+  .items[] | .metadata.name as $n |
+  (.status.images[]?.names[]? | select(contains("<repo>"))) | "\($n) \(.)"'
 ```
 
 ### Image Tag Not Found
