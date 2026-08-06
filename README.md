@@ -21,12 +21,14 @@ A production-ready 3-node Kubernetes cluster deployed with [Foundry CLI](https:/
 
 ### Node Topology
 
-| Role | IP Address | Purpose |
-|------|------------|---------|
-| Control Plane | 100.81.89.62 | K8s control plane + infrastructure services |
-| Worker 1 | 100.70.90.12 | Workloads + 2TB storage backend |
-| Worker 2 | 100.125.196.1 | Workloads |
-| Virtual IP | 100.81.89.100 | K8s API endpoint |
+| Node | Role | Tailscale | LAN | Purpose |
+|------|------|-----------|-----|---------|
+| blue1 | Control Plane | 100.81.89.62 | 192.168.1.185 | K8s control plane + infrastructure services (Zot, OpenBao) |
+| refurb | Worker | 100.70.90.12 | 192.168.1.253 | Workloads + 2TB storage backend |
+| blue2 | Worker | 100.125.196.1 | 192.168.1.97 | Workloads |
+
+The K8s API endpoint is `https://192.168.1.185:6443` (blue1). The old
+Tailscale VIP `100.81.89.100` is **deprecated** — do not use it.
 
 ### Storage Layout
 
@@ -160,6 +162,17 @@ kubectl apply -k k8s/overlays/production
 # Install Helm charts
 helm install my-app ./helm/my-app -n default
 ```
+
+Applications deployed from other repos:
+
+- **pedro-agents** (Reddit monitor, suggest, social, CFP) — see
+  [docs/pedro-agents-deployment.md](docs/pedro-agents-deployment.md).
+  Chart lives in [`pedro-bots`](https://github.com/Soypete/pedro-bots).
+
+> **Note:** image pulls from Zot currently fail on all nodes because
+> `/etc/rancher/k3s/registries.yaml` is missing — containerd speaks HTTPS to
+> a plain-HTTP registry. See
+> [docs/zot-registry-guide.md](docs/zot-registry-guide.md).
 
 ### Monitor Cluster
 

@@ -29,10 +29,15 @@ This is an Infrastructure as Code (IaC) repository containing:
 ## Cluster Architecture
 
 ### Node Topology
-- **Control Plane**: 100.81.89.62 (K8s control plane + infrastructure services)
-- **Worker 1**: 100.70.90.12 (workloads + 2TB storage backend)
-- **Worker 2**: 100.125.196.1 (workloads)
-- **Virtual IP**: 100.81.89.100 (K8s API endpoint)
+
+| Node | Role | Tailscale | LAN |
+|------|------|-----------|-----|
+| blue1 | control plane | 100.81.89.62 | 192.168.1.185 |
+| blue2 | worker | 100.125.196.1 | 192.168.1.97 |
+| refurb | worker (2TB storage backend) | 100.70.90.12 | 192.168.1.253 |
+
+The API endpoint is `https://192.168.1.185:6443` (blue1). The Tailscale VIP
+`100.81.89.100` is **deprecated** — do not point kubeconfigs at it.
 
 ### Storage Strategy
 - 2TB drive on Worker-1 mounted at `/data/persistent-storage/`
@@ -71,6 +76,12 @@ foundry logs
 ```bash
 # Set kubeconfig
 export KUBECONFIG=~/.foundry/kubeconfig
+
+# If every kubectl command fails with "the server could not find the
+# requested resource" -- including `kubectl version` and `kubectl get --raw
+# /healthz` -- the kubeconfig has no current-context selected. The error is
+# misleading; the cluster is fine. Select the context:
+kubectl --kubeconfig ~/.foundry/kubeconfig config use-context default
 
 # Cluster operations
 kubectl get nodes

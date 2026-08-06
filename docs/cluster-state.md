@@ -40,7 +40,7 @@ Last updated: 2025-07-21
 | projectcontour | Active | Ingress controller |
 | seaweedfs | Active | S3-compatible storage |
 | velero | Active | Backup system |
-| redditwatch | Active | Reddit monitoring agent |
+| redditwatch | Active | Pedro agents: Reddit monitor, suggest, social, CFP (Helm release `pedro-agents`) |
 
 ### Deleted Namespaces
 
