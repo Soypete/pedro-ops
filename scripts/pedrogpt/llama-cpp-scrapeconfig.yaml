@@ -1,4 +1,4 @@
-# SUPERSEDED — prefer the Helm chart. This file and
+# SUPERSEDED — DO NOT APPLY alongside the Helm chart. This file and
 # helm/observability/templates/external-scrapes.yaml define the SAME targets with the
 # SAME labels. Applying both double-counts every series in sum() queries.
 #
@@ -6,6 +6,9 @@
 # .Values.pedrogpt.models, so adding a model is a values edit). Keep this standalone
 # file only for a cluster without the chart installed; if you apply it, first run:
 #   kubectl delete scrapeconfig -n monitoring pedrogpt-qwen3-6-27b-mtp pedrogpt-qwen3-8-27b
+#
+# This actually happened on 2026-08-20: both were live simultaneously (llama-cpp-* from
+# this file, pedrogpt-* from the chart) until the llama-cpp-* pair was deleted.
 #
 # ScrapeConfig for llama.cpp running on pedrogpt (external to k8s cluster).
 #
