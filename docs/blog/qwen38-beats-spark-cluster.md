@@ -181,6 +181,19 @@ His pelican-riding-a-bicycle SVG took 21 minutes at the default setting — 22,2
 
 The fix was one line in the preset: `chat-template-kwargs = {"reasoning_effort": "medium"}`. But I would have shipped the "empty response" bug into production if I had not caught it.
 
+You can also override it per-request in the `/v1/chat/completions` body. llama.cpp accepts a `chat_template_kwargs` field that gets merged into the Jinja template context:
+
+```json
+{
+  "model": "qwen3.8-27b",
+  "messages": [{"role": "user", "content": "rename this function"}],
+  "chat_template_kwargs": {"reasoning_effort": "low"},
+  "max_tokens": 512
+}
+```
+
+This is how you would build a client that uses `medium` for normal edits and `xhigh` for architecture questions without restarting the server. The preset INI sets the default; the request body overrides it.
+
 ### 2. Two models do not fit on one GPU, and that is fine
 
 Qwen3.8-27B at UD-Q4_K_XL is 17.6 GB of weights. My other model (Qwen3.6-27B-MTP) is 17.9 GB. Together that is 35.5 GB of weights before a single byte of KV cache. The card has 32.6 GB. They do not both fit. Not close.
