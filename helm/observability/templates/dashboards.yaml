@@ -1,0 +1,61 @@
+{{- $dashboards := dict
+  "pedro-fleet.json" (dict "uid" "pedro-fleet" "title" "Pedro Fleet Overview" "panels" (list
+    (dict "title" "Targets Up" "type" "stat" "expr" "sum(up)" "x" 0)
+    (dict "title" "Targets Down" "type" "stat" "expr" "sum(up == 0)" "x" 8)
+    (dict "title" "Failed Probes" "type" "stat" "expr" "sum(probe_success == 0)" "x" 16)
+    (dict "title" "Container Restarts (1h)" "type" "timeseries" "expr" "sum by (namespace) (increase(kube_pod_container_status_restarts_total[1h]))" "x" 0)))
+  "pedro-applications.json" (dict "uid" "pedro-apps" "title" "Pedro Applications" "panels" (list
+    (dict "title" "Application Targets" "type" "timeseries" "expr" "up{job=~\"kei-.*|pedro-.*|llama-cpp|openbao\"}" "x" 0)
+    (dict "title" "HTTP Probe Duration" "type" "timeseries" "expr" "probe_duration_seconds{job=\"application-http\"}" "x" 12)
+    (dict "title" "Authorization Decisions" "type" "timeseries" "expr" "rate(authorization_decisions_total[5m])" "x" 0)))
+  "pedro-databases.json" (dict "uid" "pedro-databases" "title" "Pedro Databases" "panels" (list
+    (dict "title" "PostgreSQL Up" "type" "stat" "expr" "pg_up" "x" 0)
+    (dict "title" "Redis Up" "type" "stat" "expr" "redis_up" "x" 8)
+    (dict "title" "Database Connections" "type" "timeseries" "expr" "sum by (instance) (pg_stat_activity_count)" "x" 0)
+    (dict "title" "Database TCP Probe" "type" "timeseries" "expr" "probe_success{job=\"database-tcp\"}" "x" 12)))
+  "pedro-gpt.json" (dict "uid" "pedro-gpt" "title" "Pedro GPT and GPU" "panels" (list
+    (dict "title" "llama.cpp Up" "type" "stat" "expr" "up{job=\"llama-cpp\"}" "x" 0)
+    (dict "title" "GPU Utilization" "type" "timeseries" "expr" "DCGM_FI_DEV_GPU_UTIL" "x" 8)
+    (dict "title" "GPU Memory Used" "type" "timeseries" "expr" "DCGM_FI_DEV_FB_USED" "x" 0)
+    (dict "title" "GPU Temperature" "type" "timeseries" "expr" "DCGM_FI_DEV_GPU_TEMP" "x" 12)))
+-}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pedro-observability-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+  annotations:
+    grafana_folder: Pedro
+data:
+{{- range $file, $dashboard := $dashboards }}
+  {{ $file }}: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+      {{- range $i, $panel := $dashboard.panels }}{{ if $i }},{{ end }}
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {"defaults": {}, "overrides": []},
+          "gridPos": {"h": 8, "w": 8, "x": {{ $panel.x }}, "y": {{ mul (div $i 3) 8 }}},
+          "id": {{ add $i 1 }},
+          "options": {},
+          "targets": [{"expr": {{ $panel.expr | quote }}, "refId": "A"}],
+          "title": {{ $panel.title | quote }},
+          "type": {{ $panel.type | quote }}
+        }
+      {{- end }}
+      ],
+      "schemaVersion": 39,
+      "tags": ["pedro-ops"],
+      "templating": {"list": [{"name": "datasource", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}}]},
+      "time": {"from": "now-6h", "to": "now"},
+      "title": {{ $dashboard.title | quote }},
+      "uid": {{ $dashboard.uid | quote }},
+      "version": 1
+    }
+{{- end }}

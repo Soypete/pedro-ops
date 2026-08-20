@@ -1,0 +1,63 @@
+{{- /*
+  pedrogpt runs llama-server in ROUTER mode: /metrics is proxied to the child model
+  process and REQUIRES ?model=<id>, else HTTP 400. One ScrapeConfig per model.
+
+  autoload=false is deliberate: only one model is resident at a time (--models-max 1,
+  ~18 GB each), so without it a 15s scrape of the idle model would force-load it and
+  thrash the GPU. Expect one of these jobs to be DOWN at any time — that is correct.
+*/ -}}
+{{- range .Values.pedrogpt.models }}
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: pedrogpt-{{ .name | replace "." "-" }}
+  namespace: monitoring
+  labels:
+    {{- include "pedro-observability.labels" $ | nindent 4 }}
+spec:
+  staticConfigs:
+    - targets: [{{ $.Values.externalTargets.llama | quote }}]
+      labels: {job: llama-cpp, instance: pedrogpt, model: {{ .name | quote }}}
+  metricsPath: /metrics
+  params:
+    model:
+      - {{ .name | quote }}
+    autoload:
+      - "false"
+  scrapeInterval: 15s
+  scrapeTimeout: 10s
+---
+{{- end }}
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: pedrogpt-host
+  namespace: monitoring
+  labels:
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+spec:
+  staticConfigs:
+    - targets: [{{ .Values.externalTargets.node | quote }}]
+      labels: {job: node-exporter, instance: pedrogpt}
+    - targets: [{{ .Values.externalTargets.dcgm | quote }}]
+      labels: {job: dcgm-exporter, instance: pedrogpt}
+  metricsPath: /metrics
+  scrapeInterval: 15s
+  scrapeTimeout: 10s
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: openbao-external
+  namespace: monitoring
+  labels:
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+spec:
+  staticConfigs:
+    - targets: [{{ .Values.externalTargets.openbao | quote }}]
+      labels: {job: openbao, instance: refurb}
+  metricsPath: /v1/sys/metrics
+  params:
+    format: [prometheus]
+  scrapeInterval: {{ .Values.scrapeInterval }}
+  scrapeTimeout: 10s

@@ -2,14 +2,25 @@
 
 Runtime operations for the llama-server on pedrogpt (100.121.229.114, RTX 5090 / Blackwell sm_120).
 
-The server runs **one dedicated tuned model**: **Qwen3.6-27B with Multi-Token Prediction (MTP)**,
-served under the API id **`qwen3.6-27b-mtp`**. MTP is a self-speculative decoding mode (a draft head
-baked into the GGUF) that gives ~1.4–2.2x faster generation with no quality loss; it requires a single
-request stream (`--parallel 1`), so the box serves exactly one model.
+The server runs in **router mode**, serving **two** models. Callers pick one per request via the
+`"model"` field in `/v1/chat/completions`:
 
-The service is launched by `/opt/llama.cpp/run-server.sh` from `/etc/llama-server.env`
-(see `setup-llama-cpp.sh`). The previous 5-model router was retired — see
-`docs/llama-cpp-build.md` for the build/perf rationale, and `presets/README.md` for the rollback path.
+| API id | Model | MTP | ctx | Resident |
+|---|---|---|---|---|
+| `qwen3.6-27b-mtp` | Qwen3.6-27B-MTP | yes (~1.4–2.2x, no quality loss) | 216064 | loads on startup |
+| `qwen3.8-27b` | Qwen3.8-27B (dense) | no | 131072 | loads on demand |
+
+**Only one is resident at a time.** `qwen3.6-27b-mtp` alone measures 27.9 GB of 32.6 GB VRAM, and two
+27B Q4 models are 35.5 GB of weights before any KV cache — they cannot coexist at any context size.
+`--models-max 1` makes them swap, which costs ~18 GB of I/O on the first request after a switch but
+lets each keep its full context.
+
+MTP requires a single request stream (`--parallel 1`). That is a *per-model* setting and does not
+prevent router mode: each model runs as its own child process.
+
+The service is launched by `/opt/llama.cpp/run-server.sh` from `/etc/llama-server.env`, with
+per-model tuning in `/etc/llama-server-models.ini` (source: `presets/router.ini`). See
+`presets/README.md` for the full flag mapping and `docs/llama-cpp-build.md` for build rationale.
 
 ---
 
@@ -78,15 +89,16 @@ curl http://100.121.229.114:8000/v1/chat/completions \
 #     -d '{"model": "nomic-embed-text", "input": "The quick brown fox"}'
 ```
 
-### Swapping the model later
+### Switching models
 
-Single-model mode has no on-the-fly router. To change the model, update
-`/etc/llama-server.env` and restart — use `switch-model.sh` on the box:
+Nothing to switch server-side: both models are always registered, and naming one in a request loads
+it automatically (evicting the other). Use `switch-model.sh` only to pre-warm before a benchmark or
+to free VRAM:
 
 ```bash
-ssh pedrogpt
-./switch-model.sh download unsloth/Qwen3.6-27B-MTP-GGUF "*UD-Q4_K_XL*" /opt/models/qwen3.6-27b-mtp
-./switch-model.sh /opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-MTP-UD-Q4_K_XL.gguf qwen3.6-27b-mtp
+./switch-model.sh --host pedrogpt list                  # ids + load status
+./switch-model.sh --host pedrogpt load   qwen3.8-27b    # pre-warm (~18 GB, evicts the other)
+./switch-model.sh --host pedrogpt unload qwen3.8-27b    # free VRAM
 ```
 
 ### Embeddings (separate sidecar)
@@ -160,18 +172,31 @@ ssh soypete@100.121.229.114 "sudo journalctl -u llama-server | grep -i 'spec\|dr
 
 ---
 
-## Replacing the model
+## Adding or replacing a model
 
-Single-model mode has no router. To change the served model, swap it in
-`/etc/llama-server.env` and restart — `switch-model.sh` does both (run it on the box):
+Models are declared in `presets/router.ini` (deployed to `/etc/llama-server-models.ini`), so this is
+a config change plus a redeploy — not an env edit:
 
 ```bash
-ssh soypete@100.121.229.114
-# download a new GGUF (prefer an MTP variant for the free speedup)
+# 1. download the GGUF on the box
 ./switch-model.sh download <org>/<model>-GGUF "*UD-Q4_K_XL*" /opt/models/<model-name>
-# activate it (path + API alias); MTP is auto-disabled for non-MTP GGUFs
-./switch-model.sh /opt/models/<model-name>/<file>.gguf <api-alias>
+
+# 2. add a section to scripts/pedrogpt/presets/router.ini
+#      [<api-id>]
+#      model = /opt/models/<model-name>/<file>.gguf
+#      ctx-size = ...
+#    Put MTP flags (spec-type/spec-draft-*) in the section ONLY if that GGUF has a
+#    draft head — inheriting them on a non-MTP model crashes it on load.
+
+# 3. redeploy from your workstation
+./deploy-presets.sh --env /tmp/llama-server.env
+
+# 4. add a Prometheus job for it (?model=<id>&autoload=false) in
+#    llama-cpp-scrapeconfig.yaml and helm/observability/values.yaml
 ```
+
+VRAM, not config, is the binding constraint: a third 27B-class model still means one resident at a
+time and more swap thrash.
 
 When picking a model: check [LiveBench](https://livebench.ai) for scores, find a GGUF on HuggingFace
 (prefer `unsloth`/`bartowski`), size it to leave VRAM for the KV cache (dense up to ~30B at Q4 fits
@@ -193,18 +218,36 @@ ssh soypete@100.121.229.114 "sudo systemctl restart llama-server"
 ssh soypete@100.121.229.114 "cat /etc/llama-server.env; cat /opt/llama.cpp/run-server.sh"
 ```
 
-### Roll back to the old router (5-model) mode
+### Roll back to single-model mode
 
-The router mechanism is retired but recoverable: restore a `--models-preset` drop-in at
-`/etc/systemd/system/llama-server.service.d/preset.conf` pointing at `presets/all-models.ini`,
-`daemon-reload`, and restart. See `presets/README.md` and `git log` for the prior config. Note MTP
-cannot run in router mode (`--parallel 1` only), so rolling back trades the MTP speedup for
-multi-model switching.
+Router mode is selected purely by the ABSENCE of `-m`, so rollback is a file swap. Snapshot before
+deploying, then restore:
+
+```bash
+# snapshot BEFORE any deploy
+ssh pedrogpt 'sudo cp /etc/systemd/system/llama-server.service /root/llama-server.service.bak \
+  && sudo cp /etc/llama-server.env /root/llama-server.env.bak \
+  && sudo cp /opt/llama.cpp/run-server.sh /root/run-server.sh.bak'
+
+# roll back
+ssh pedrogpt 'sudo cp /root/run-server.sh.bak /opt/llama.cpp/run-server.sh \
+  && sudo cp /root/llama-server.env.bak /etc/llama-server.env \
+  && sudo cp /root/llama-server.service.bak /etc/systemd/system/llama-server.service \
+  && sudo rm -f /etc/llama-server-models.ini \
+  && sudo systemctl daemon-reload && sudo systemctl restart llama-server'
+```
+
+Then revert both ScrapeConfigs (drop the `params:` blocks and the second job). The Qwen3.8 GGUF can
+stay on disk — it costs disk, not VRAM.
 
 ### Check Prometheus metrics
 
+In router mode `/metrics` is proxied to the child and **requires** `?model=`; plain `/metrics`
+returns HTTP 400. `/health` is unaffected.
+
 ```bash
-curl http://100.121.229.114:8000/metrics | grep -E 'llama_|requests_'
+curl 'http://100.121.229.114:8000/metrics?model=qwen3.6-27b-mtp&autoload=false' | grep -E 'llamacpp:'
+curl http://100.121.229.114:8000/health
 ```
 
 ### GPU memory usage
@@ -221,8 +264,11 @@ ssh soypete@100.121.229.114 "nvidia-smi --query-gpu=memory.used,memory.free,memo
 |------|-------------|
 | `/opt/llama.cpp/` | llama.cpp build (CUDA 12.8, sm_120) |
 | `/opt/llama.cpp/build/bin/llama-server` | server binary |
-| `/opt/llama.cpp/run-server.sh` | launcher wrapper (reads the env file, assembles MTP/KV flags) |
-| `/opt/models/qwen3.6-27b-mtp/` | the MTP GGUF |
+| `/opt/llama.cpp/run-server.sh` | launcher wrapper (starts the router; no `-m`) |
+| `/opt/models/qwen3.6-27b-mtp/` | Qwen3.6-27B MTP GGUF |
+| `/opt/models/qwen3.8-27b/` | Qwen3.8-27B GGUF |
 | `/etc/systemd/system/llama-server.service` | systemd unit (runs `run-server.sh`) |
-| `/etc/llama-server.env` | runtime config: `MODEL`, `MODEL_ALIAS`, `SPEC_TYPE`, `N_CTX`, sampling, etc. |
-| `scripts/pedrogpt/presets/all-models.ini` | rollback/reference INI for router mode (not used live) |
+| `/etc/llama-server.env` | router config: `MODELS_PRESET`, `MODELS_MAX`, `PORT`, `HF_TOKEN` |
+| `/etc/llama-server-models.ini` | **per-model tuning** (from `presets/router.ini`) |
+| `scripts/pedrogpt/presets/router.ini` | source of truth for the models served |
+| `scripts/pedrogpt/presets/*.ini` (others) | DEPRECATED, retired models, not deployed |

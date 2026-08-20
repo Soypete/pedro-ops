@@ -1,0 +1,54 @@
+{{- $root := . -}}
+{{- $monitors := list
+  (dict "namespace" "chatbot" "name" "pedro-twitch" "port" "http")
+  (dict "namespace" "pedro-discord" "name" "pedro-discord" "port" "http")
+-}}
+{{- range $monitors }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .name }}
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "pedro-observability.labels" $root | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ .namespace }}]
+  selector:
+    matchLabels:
+      {{- if eq .namespace "chatbot" }}
+      app.kubernetes.io/component: twitch
+      app.kubernetes.io/instance: pedro
+      {{- else if eq .namespace "pedro-discord" }}
+      app.kubernetes.io/instance: pedro-discord
+      app.kubernetes.io/name: pedro-discord
+      {{- end }}
+  endpoints:
+    - port: {{ .port }}
+      path: /metrics
+      interval: {{ $root.Values.scrapeInterval }}
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: app
+          replacement: {{ .name }}
+{{- end }}
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: kei-applications
+  namespace: monitoring
+  labels:
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+spec:
+  staticConfigs:
+    - targets: ["abac-engine.kei.svc.cluster.local:80"]
+      labels: {job: kei-abac, namespace: kei, service: abac-engine}
+    - targets: ["oidc-bridge.kei.svc.cluster.local:80"]
+      labels: {job: kei-oidc, namespace: kei, service: oidc-bridge}
+    - targets: ["web.kei.svc.cluster.local:80"]
+      labels: {job: kei-web, namespace: kei, service: web}
+  metricsPath: /metrics
+  scrapeInterval: 30s
+  scrapeTimeout: 10s

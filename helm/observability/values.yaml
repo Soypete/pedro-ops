@@ -1,0 +1,26 @@
+prometheusRelease: kube-prometheus-stack
+
+images:
+  blackboxExporter: prom/blackbox-exporter:v0.25.0
+  postgresExporter: prometheuscommunity/postgres-exporter:v0.17.1
+  redisExporter: oliver006/redis_exporter:v1.67.0
+
+externalTargets:
+  llama: 100.121.229.114:8000
+  node: 100.121.229.114:9100
+  dcgm: 100.121.229.114:9400
+  openbao: 100.70.90.12:8200
+
+# Models served by llama-server on pedrogpt (router mode). One ScrapeConfig is
+# generated per entry. Keep in sync with scripts/pedrogpt/presets/router.ini —
+# the `name` must match the INI section name exactly (it is the API model id).
+pedrogpt:
+  models:
+    - name: qwen3.6-27b-mtp
+    - name: qwen3.8-27b
+
+discord:
+  secretName: alertmanager-discord
+  secretKey: webhook-url
+
+scrapeInterval: 30s

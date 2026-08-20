@@ -2,7 +2,7 @@
 
 # Setup llama.cpp on Ubuntu (pedrogpt) with CUDA support.
 # Builds llama-server and installs it as a systemd service that
-# exposes Prometheus metrics at :8000/metrics.
+# exposes Prometheus metrics at :8000/metrics?model=<id> (router mode requires the param).
 #
 # Usage: ./setup-llama-cpp-ubuntu.sh [--rebuild]
 #   --rebuild  Force a clean rebuild even if llama.cpp is already installed
@@ -13,6 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LLAMA_DIR="/opt/llama.cpp"
 MODEL_DIR="/opt/models"
 ENV_FILE="/etc/llama-server.env"
+MODELS_PRESET_PATH="/etc/llama-server-models.ini"
 SERVICE_FILE="/etc/systemd/system/llama-server.service"
 PORT=8000
 
@@ -185,54 +186,30 @@ echo "Use ./switch-model.sh to download and activate a model."
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "--- Creating $ENV_FILE ---"
   sudo tee "$ENV_FILE" > /dev/null <<'EOF'
-# llama-server runtime configuration — dedicated Qwen3.6-27B MTP single-model server.
+# llama-server runtime configuration — ROUTER mode (two models, one resident).
 # Edit this file then: sudo systemctl restart llama-server
 #
-# This box runs ONE tuned model with Multi-Token Prediction (MTP) self-speculative
-# decoding. MTP requires a single stream (N_PARALLEL=1) — it cannot share VRAM with
-# multi-slot continuous batching. Router/preset mode is retired (kept as rollback only).
+# Per-model tuning (GGUF paths, ctx, sampling, MTP flags) lives in the preset INI
+# below, NOT here. Source of truth: scripts/pedrogpt/presets/router.ini in pedro-ops,
+# deployed by deploy-presets.sh. See presets/README.md for the full flag mapping.
 
-# Local GGUF path (downloaded by switch-model.sh / hf download). The MTP head is baked
-# into this checkpoint, so no separate draft model is needed.
-MODEL=/opt/models/qwen3.6-27b-mtp/Qwen3.6-27B-MTP-UD-Q4_K_XL.gguf
+# Model preset INI defining every servable model.
+MODELS_PRESET=/etc/llama-server-models.ini
 
-# API model id advertised at /v1/models and required in request "model" fields.
-MODEL_ALIAS=qwen3.6-27b-mtp
+# Max models resident in VRAM at once. MUST stay 1: qwen3.6-27b-mtp alone measures
+# 27.9 GB of 32.6 GB, and two 27B Q4 models are 35.5 GB of weights before any KV cache.
+# Raising this will OOM the GPU. Past this limit the router LRU-evicts.
+MODELS_MAX=1
+
+# Autoload a model when a request names one that is not resident (1 = on).
+# With MODELS_MAX=1 this is what makes model switching work at all.
+MODELS_AUTOLOAD=1
 
 # HuggingFace cache directory (on the 2TB drive)
 HF_HOME=/opt/models/cache
 
-# GPU layers (99 = all layers on GPU; the dense 27B fits fully in 32GB VRAM)
-N_GPU_LAYERS=99
-
-# Context window (tokens). 65536 fits alongside Q4 weights + MTP head + q8_0 KV cache.
-# Qwen3.6's hybrid DeltaNet/GQA layout keeps the KV cache small; 131072 also fits if needed.
-N_CTX=65536
-
-# Parallel request slots — MUST be 1 for MTP.
-N_PARALLEL=1
-
-# Batch sizes: -b logical token budget, -ub physical micro-batch shipped to the GPU.
-# Larger UBATCH improves prompt-processing (prefill) throughput; 1024 is safe on a 5090.
-BATCH=2048
-UBATCH=1024
-
-# MTP self-speculative decoding. SPEC_DRAFT_N = max draft tokens per step (start 2, try 3).
-# Confirm the exact spec-type spelling for your build: llama-server --help | grep -i spec
-SPEC_TYPE=draft-mtp
-SPEC_DRAFT_N=3
-
-# KV cache quantization (q8_0 halves KV VRAM at negligible quality cost). Requires flash-attn.
-# K and V MUST match or llama.cpp silently falls back to the slow attention path.
-CACHE_TYPE_K=q8_0
-CACHE_TYPE_V=q8_0
-
-# Sampling (Unsloth non-thinking recommendation for Qwen3.6).
-TEMP=0.7
-TOP_K=20
-TOP_P=0.8
-PRESENCE_PENALTY=1.5
-MIN_P=0.0
+# Destination for llama.cpp's own `-hf` pulls. Outranks HF_HOME for that purpose.
+LLAMA_CACHE=/opt/models/cache/llama.cpp
 
 # Server port (Tailscale serve maps this to HTTPS)
 PORT=8000
@@ -243,12 +220,13 @@ EOF
   echo "Edit $ENV_FILE before starting the service."
 else
   echo "--- $ENV_FILE already exists, skipping ---"
-  echo "    (single-model MTP mode reads MODEL/MODEL_ALIAS/SPEC_TYPE etc. — see the template above"
-  echo "     if upgrading from router/MoE mode, replace the old env file)"
+  echo "    (router mode reads MODELS_PRESET/MODELS_MAX/MODELS_AUTOLOAD — see the template above."
+  echo "     If upgrading from single-model mode, the old MODEL/MODEL_ALIAS/SPEC_TYPE/N_CTX vars"
+  echo "     are no longer read; per-model tuning moved to \$MODELS_PRESET.)"
 fi
 
 # ---------------------------------------------------------------------------
-# Wrapper script — launches the dedicated Qwen3.6-27B MTP single-model server.
+# Wrapper script — launches llama-server in router mode (no -m; models from the preset INI).
 # Installed from the committed run-server.sh (single source of truth, also used
 # by deploy-presets.sh). Reads /etc/llama-server.env.
 # ---------------------------------------------------------------------------
@@ -289,20 +267,30 @@ echo ""
 echo "=== Setup complete ==="
 echo ""
 echo "Next steps:"
-echo "  1. Download the MTP model (~18 GB to /opt/models/qwen3.6-27b-mtp):"
+echo "  1. Download both models (~18 GB each):"
 echo "       hf download unsloth/Qwen3.6-27B-MTP-GGUF --include '*UD-Q4_K_XL*' \\"
 echo "         --local-dir /opt/models/qwen3.6-27b-mtp"
-echo "     Then set MODEL= in $ENV_FILE to the downloaded .gguf path."
+echo "       hf download unsloth/Qwen3.8-27B-GGUF --include 'Qwen3.8-27B-UD-Q4_K_XL.gguf' \\"
+echo "         --local-dir /opt/models/qwen3.8-27b"
+echo "     Paths must match the model= keys in the preset INI (step 2)."
 echo ""
-echo "  2. Confirm the MTP flag spelling matches this build:"
-echo "       $LLAMA_DIR/build/bin/llama-server --help | grep -i spec"
+echo "  2. Deploy the router preset — the server will NOT start without it:"
+echo "       # from a checkout of pedro-ops, on your workstation:"
+echo "       ./scripts/pedrogpt/deploy-presets.sh --env /tmp/llama-server.env"
+echo "     That installs presets/router.ini to $MODELS_PRESET_PATH."
 echo ""
-echo "  3. Start the server:"
+echo "  3. Confirm this build has router support and the MTP flag spelling:"
+echo "       $LLAMA_DIR/build/bin/llama-server --help | grep -E -- '--models|spec-type'"
+echo ""
+echo "  4. Start the server:"
 echo "       sudo systemctl start llama-server"
 echo "       sudo systemctl status llama-server"
 echo ""
-echo "  4. Verify it's serving the MTP model and metrics:"
-echo "       curl http://localhost:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp"
-echo "       curl http://localhost:8000/metrics | head -20"
+echo "  5. Verify both models are registered and metrics work:"
+echo "       curl http://localhost:8000/v1/models | jq '.data[].id'"
+echo "         # -> qwen3.6-27b-mtp, qwen3.8-27b"
+echo "       curl http://localhost:8000/health                        # 200, no ?model= needed"
+echo "       curl 'http://localhost:8000/metrics?model=qwen3.6-27b-mtp&autoload=false' | head"
+echo "         # NOTE: plain /metrics returns HTTP 400 in router mode — ?model= is required"
 echo ""
 echo "  Logs: sudo journalctl -u llama-server -f"

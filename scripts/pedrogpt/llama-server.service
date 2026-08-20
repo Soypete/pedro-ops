@@ -1,12 +1,15 @@
 # llama-server systemd unit for pedrogpt (RTX 5090 / Blackwell sm_120).
 #
 # Source of truth for /etc/systemd/system/llama-server.service on pedrogpt —
-# deployed by deploy-presets.sh (scp or taildrop). All launch flags live in
-# /opt/llama.cpp/run-server.sh + /etc/llama-server.env, so this unit rarely
-# changes: edit the env file for tuning, edit run-server.sh for new flags.
+# deployed by deploy-presets.sh (scp or taildrop). Launch flags live in
+# /opt/llama.cpp/run-server.sh + /etc/llama-server.env, and PER-MODEL tuning lives in
+# /etc/llama-server-models.ini, so this unit rarely changes.
+#
+# Runs llama-server in router mode: this process serves no model itself, it spawns a
+# child process per model on demand (--models-max 1, so they swap).
 
 [Unit]
-Description=llama.cpp Server (Qwen3.6-27B MTP)
+Description=llama.cpp Server (router: qwen3.6-27b-mtp + qwen3.8-27b)
 Documentation=https://github.com/Soypete/pedro-ops
 After=network-online.target
 Wants=network-online.target
@@ -16,6 +19,8 @@ Type=simple
 ExecStart=/opt/llama.cpp/run-server.sh
 Restart=on-failure
 RestartSec=10
+# A model swap unloads ~18 GB and loads another; give children room to exit cleanly.
+TimeoutStopSec=120
 SyslogIdentifier=llama-server
 SupplementaryGroups=render video
 

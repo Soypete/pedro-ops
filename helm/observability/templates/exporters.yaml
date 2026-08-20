@@ -1,0 +1,128 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter-kei
+  namespace: kei
+  labels: {app.kubernetes.io/name: postgres-exporter-kei}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: postgres-exporter-kei}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: postgres-exporter-kei}}
+    spec:
+      containers:
+        - name: exporter
+          image: {{ .Values.images.postgresExporter }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATA_SOURCE_NAME
+              valueFrom: {secretKeyRef: {name: kei-db-connection, key: url}}
+          ports: [{name: metrics, containerPort: 9187}]
+          readinessProbe: {httpGet: {path: /metrics, port: metrics}, initialDelaySeconds: 5, periodSeconds: 10}
+          resources: {requests: {cpu: 20m, memory: 32Mi}, limits: {cpu: 100m, memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter-kei
+  namespace: kei
+  labels: {app.kubernetes.io/name: postgres-exporter-kei}
+spec:
+  selector: {app.kubernetes.io/name: postgres-exporter-kei}
+  ports: [{name: metrics, port: 9187, targetPort: metrics}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-exporter-kei
+  namespace: kei
+  labels:
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+spec:
+  selector: {matchLabels: {app.kubernetes.io/name: postgres-exporter-kei}}
+  endpoints: [{port: metrics, path: /metrics, interval: 30s}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter-chatbot
+  namespace: chatbot
+  labels: {app.kubernetes.io/name: postgres-exporter-chatbot}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: postgres-exporter-chatbot}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: postgres-exporter-chatbot}}
+    spec:
+      containers:
+        - name: exporter
+          image: {{ .Values.images.postgresExporter }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DATA_SOURCE_NAME
+              valueFrom: {secretKeyRef: {name: pedro-secrets, key: postgresUrl}}
+          ports: [{name: metrics, containerPort: 9187}]
+          readinessProbe: {httpGet: {path: /metrics, port: metrics}, initialDelaySeconds: 5, periodSeconds: 10}
+          resources: {requests: {cpu: 20m, memory: 32Mi}, limits: {cpu: 100m, memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter-chatbot
+  namespace: chatbot
+  labels: {app.kubernetes.io/name: postgres-exporter-chatbot}
+spec:
+  selector: {app.kubernetes.io/name: postgres-exporter-chatbot}
+  ports: [{name: metrics, port: 9187, targetPort: metrics}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-exporter-chatbot
+  namespace: chatbot
+  labels:
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+spec:
+  selector: {matchLabels: {app.kubernetes.io/name: postgres-exporter-chatbot}}
+  endpoints: [{port: metrics, path: /metrics, interval: 30s}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-exporter
+  namespace: openwebui
+  labels: {app.kubernetes.io/name: redis-exporter}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: redis-exporter}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: redis-exporter}}
+    spec:
+      containers:
+        - name: exporter
+          image: {{ .Values.images.redisExporter }}
+          imagePullPolicy: IfNotPresent
+          env: [{name: REDIS_ADDR, value: "redis://openwebui-open-webui-redis:6379"}]
+          ports: [{name: metrics, containerPort: 9121}]
+          resources: {requests: {cpu: 20m, memory: 32Mi}, limits: {cpu: 100m, memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-exporter
+  namespace: openwebui
+  labels: {app.kubernetes.io/name: redis-exporter}
+spec:
+  selector: {app.kubernetes.io/name: redis-exporter}
+  ports: [{name: metrics, port: 9121, targetPort: metrics}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-exporter
+  namespace: openwebui
+  labels:
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+spec:
+  selector: {matchLabels: {app.kubernetes.io/name: redis-exporter}}
+  endpoints: [{port: metrics, path: /metrics, interval: 30s}]
