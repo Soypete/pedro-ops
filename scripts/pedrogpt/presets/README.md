@@ -115,6 +115,59 @@ Roll back the `ctx-size` if it OOMs or if free VRAM drops below ~1 GB.
 > Because `--models-max 1` means each model has the whole card to itself, context is bounded by the
 > single largest model, not by the sum. Adding a third model does not shrink anyone's context.
 
+## Reasoning / thinking control
+
+Two **different** mechanisms are easy to confuse:
+
+| | `--reasoning-budget N` | `reasoning_effort` |
+|---|---|---|
+| Kind | llama.cpp CLI flag / preset key | key inside `chat-template-kwargs` |
+| Type | **integer only** — `-1`, `0`, or `N>0` | **keyword** — model-defined |
+| Values | `-1` unrestricted (default), `0` end immediately, `N` cap at N tokens | see below |
+| Enforced by | llama.cpp's sampler — a hard stop | the model's Jinja template |
+
+`--reasoning-budget` rejects anything below `-1` (`common/arg.cpp`) and does **not** accept
+`low`/`medium`/`high`. Passing a keyword there fails to parse. Related flags: `-rea, --reasoning
+on|off|auto` (a plain switch) and `--reasoning-format` (where thoughts are returned, not whether
+they happen).
+
+`reasoning_effort` is passed straight through to the model — llama.cpp neither validates nor
+interprets it — so **the valid values are defined by the model's chat template**, which is why no
+list appears in llama.cpp's docs.
+
+### Values this box's models accept
+
+**`qwen3.8-27b`** — its embedded template accepts exactly three, and raises
+`Unexpected reasoning effort ... Supported types are xhigh (default), medium, and low.` on anything
+else:
+
+| Value | Notes |
+|---|---|
+| `xhigh` | **the template's default** — maximum effort |
+| `medium` | **what we set** — good latency/quality trade |
+| `low` | brief, focused thinking |
+
+`high` is accepted but **silently remapped onto `xhigh`**, so it is not a distinct tier — which is
+why advice to prefer "medium or max" over "high/xhigh" holds here: there is no separate `high` to gain from.
+
+Left unset, this model reasons at `xhigh` on **every** request. That is worth knowing because it
+makes short-`max_tokens` calls appear to return an empty reply: the whole budget is consumed by
+thinking, and the content field comes back empty while `reasoning_content` is populated. We set
+`medium` explicitly in `router.ini`.
+
+**`qwen3.6-27b-mtp`** disables thinking outright with `chat-template-kwargs =
+{"enable_thinking":false}` — a Qwen-template-specific key that predates `reasoning_effort`.
+
+To inspect what any GGUF supports, read its embedded template:
+
+```bash
+# dump tokenizer.chat_template from the GGUF and grep for the key
+llama-gguf /opt/models/<model>/<file>.gguf r n | grep -i chat_template
+```
+
+Reference: `tools/server/README.md` (the `--chat-template-kwargs` flag, and the per-request
+`chat_template_kwargs` body field) and `docs/preset.md` for the INI form.
+
 ## Metrics changed under router mode
 
 `/metrics` is proxied to the child and **requires** `?model=<id>`, else HTTP 400

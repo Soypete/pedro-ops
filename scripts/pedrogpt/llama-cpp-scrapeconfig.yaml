@@ -1,3 +1,12 @@
+# SUPERSEDED — prefer the Helm chart. This file and
+# helm/observability/templates/external-scrapes.yaml define the SAME targets with the
+# SAME labels. Applying both double-counts every series in sum() queries.
+#
+# The chart is the source of truth (it generates one job per entry in
+# .Values.pedrogpt.models, so adding a model is a values edit). Keep this standalone
+# file only for a cluster without the chart installed; if you apply it, first run:
+#   kubectl delete scrapeconfig -n monitoring pedrogpt-qwen3-6-27b-mtp pedrogpt-qwen3-8-27b
+#
 # ScrapeConfig for llama.cpp running on pedrogpt (external to k8s cluster).
 #
 # pedrogpt runs llama-server in ROUTER mode serving two models, so there is one
@@ -53,7 +62,7 @@ spec:
     autoload:
       - "false"
   scrapeInterval: 15s
-  scrapeTimeout: 15s
+  scrapeTimeout: 10s
 ---
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: ScrapeConfig
@@ -80,4 +89,4 @@ spec:
     autoload:
       - "false"
   scrapeInterval: 15s
-  scrapeTimeout: 15s
+  scrapeTimeout: 10s

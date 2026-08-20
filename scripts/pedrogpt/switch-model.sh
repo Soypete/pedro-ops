@@ -66,8 +66,16 @@ if [[ "$SUBCOMMAND" == "download" ]]; then
     echo "Usage: $0 download <hf-repo> <include-glob> <local-dir>"
     exit 1
   fi
-  echo "=== Downloading $HF_REPO ($INCLUDE) -> $LOCAL_DIR ==="
-  hf download "$HF_REPO" --include "$INCLUDE" --local-dir "$LOCAL_DIR"
+  # The model must land on the machine running llama-server, not on your laptop.
+  # list/load/unload talk to $BASE over HTTP and work from anywhere, but downloading
+  # is inherently local, so run it over SSH when --host names a remote box.
+  if [[ "$HOST" != "localhost" && "$HOST" != "127.0.0.1" ]]; then
+    echo "=== Downloading $HF_REPO ($INCLUDE) -> $HOST:$LOCAL_DIR ==="
+    ssh "$HOST" "hf download '$HF_REPO' --include '$INCLUDE' --local-dir '$LOCAL_DIR'"
+  else
+    echo "=== Downloading $HF_REPO ($INCLUDE) -> $LOCAL_DIR (local) ==="
+    hf download "$HF_REPO" --include "$INCLUDE" --local-dir "$LOCAL_DIR"
+  fi
   echo ""
   echo "Downloaded. To serve it:"
   echo "  1. add a section to presets/router.ini with model = $LOCAL_DIR/<file>.gguf"

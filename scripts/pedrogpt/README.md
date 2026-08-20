@@ -8,7 +8,7 @@ The server runs in **router mode**, serving **two** models. Callers pick one per
 | API id | Model | MTP | ctx | Resident |
 |---|---|---|---|---|
 | `qwen3.6-27b-mtp` | Qwen3.6-27B-MTP | yes (~1.4–2.2x, no quality loss) | 216064 | loads on startup |
-| `qwen3.8-27b` | Qwen3.8-27B (dense) | no | 131072 | loads on demand |
+| `qwen3.8-27b` | Qwen3.8-27B (dense) | no | 262144 | loads on demand |
 
 **Only one is resident at a time.** `qwen3.6-27b-mtp` alone measures 27.9 GB of 32.6 GB VRAM, and two
 27B Q4 models are 35.5 GB of weights before any KV cache — they cannot coexist at any context size.
