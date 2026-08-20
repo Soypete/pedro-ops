@@ -325,9 +325,13 @@ func summarize(backends []backend, results map[string][]runResult) {
 			fmt.Printf("%-30s %8s %9s %9s %9s %8s\n", trunc(be.label, 30), "0", "-", "-", "-", "-")
 			continue
 		}
-		fmt.Printf("%-30s %8d %9.1f %9.1f %9.1f %8.1f\n",
+		tokStr := "-"
+		if len(gen) > 0 {
+			tokStr = fmt.Sprintf("%.1f", mean(gen))
+		}
+		fmt.Printf("%-30s %8d %9.1f %9.1f %9.1f %8s\n",
 			trunc(be.label, 30), len(ttft),
-			percentile(ttft, 50), percentile(ttft, 95), mean(ttft), mean(gen))
+			percentile(ttft, 50), percentile(ttft, 95), mean(ttft), tokStr)
 		if fails > 0 {
 			fmt.Printf("%-30s   (%d request(s) failed)\n", "", fails)
 		}

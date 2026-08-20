@@ -90,8 +90,13 @@ spec:
             , "model", "$1", "model_name", "(.*)")
 
         # ---------------------------------------------------------------
-        # Mean prefill seconds per request. Comparable across backends
-        # (both exclude queueing), but NOT normalised for prompt length.
+        # Mean prefill seconds per request. vLLM only.
+        #
+        # llama.cpp exposes no per-request prefill counter — only cumulative
+        # prompt_seconds_total and n_decode_total (decode steps, not requests).
+        # Dividing prompt time by n_decode_total yields "prefill seconds per
+        # generated token", not "per request", so no llama.cpp rule is emitted.
+        # Use llm:prefill_tokens_per_sec:rate5m for the cross-backend number.
         # ---------------------------------------------------------------
         - record: llm:prefill_seconds:avg
           expr: |
@@ -100,12 +105,6 @@ spec:
               /
               clamp_min(sum by (model_name) (rate(vllm:request_prefill_time_seconds_count[5m])), 0.001)
             , "model", "$1", "model_name", "(.*)")
-
-        - record: llm:prefill_seconds:avg
-          expr: |
-            sum by (instance, model) (rate(llamacpp:prompt_seconds_total[5m]))
-            /
-            clamp_min(sum by (instance, model) (rate(llamacpp:n_decode_total[5m])), 0.001)
 
         # ---------------------------------------------------------------
         # TRUE TTFT — vLLM only. Includes queueing.
