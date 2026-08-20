@@ -7,6 +7,9 @@ images:
 
 externalTargets:
   llama: 100.121.229.114:8000
+  # Ray/vLLM cluster (Spark). Exposes vllm:* metrics including a true
+  # time_to_first_token_seconds histogram.
+  ray: 100.87.122.109:8000
   node: 100.121.229.114:9100
   dcgm: 100.121.229.114:9400
   openbao: 100.70.90.12:8200

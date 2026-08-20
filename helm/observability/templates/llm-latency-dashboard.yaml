@@ -1,0 +1,734 @@
+{{- /*
+  Grafana dashboard comparing inference latency between the two backends driven
+  from opencode: the Spark/Ray vLLM cluster and pedrogpt (llama.cpp).
+
+  Kept as a standalone ConfigMap rather than an entry in dashboards.yaml because
+  that file's generator emits one expr per panel; this dashboard needs multi-series
+  panels, per-panel units, and explanatory descriptions.
+
+  Grafana legend placeholders are written as {{`{{`}}...{{`}}`}} so Helm passes them
+  through literally instead of trying to evaluate them as template actions.
+
+  Health note: the idle pedrogpt model's scrape target reads DOWN by design.
+  Only one model fits in 32GB VRAM and scrapes pass autoload=false, so Prometheus
+  cannot force-load ~18 GB just to collect metrics.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pedro-llm-latency-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+  annotations:
+    grafana_folder: Pedro
+data:
+  llm-latency-comparison.json: |
+    {
+      "annotations": {
+        "list": []
+      },
+      "editable": true,
+      "graphTooltip": 1,
+      "description": "Compares inference latency between the Spark/Ray vLLM cluster (MiniMax-M2.5-AWQ) and pedrogpt llama.cpp (Qwen3.6-27B-MTP, Qwen3.8-27B), as driven from opencode. NOTE: vLLM reports true TTFT histograms; llama.cpp reports only cumulative counters and has no TTFT metric, so cross-backend TTFT is modelled from prefill throughput at a fixed prompt length.",
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 1,
+          "title": "vLLM TTFT (avg, real)",
+          "type": "stat",
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:ttft_seconds:avg",
+              "legendFormat": "{{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "TRUE measured time-to-first-token from vLLM's histogram. Includes queueing.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 2
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 2,
+          "title": "vLLM TTFT p95",
+          "type": "stat",
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 0
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:ttft_seconds:p95",
+              "legendFormat": "{{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "95th percentile TTFT. vLLM only \u2014 llama.cpp has no equivalent.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 2
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 3,
+          "title": "Modelled TTFT @ 4k prompt",
+          "type": "stat",
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 0
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:ttft_modelled_seconds:at_4k",
+              "legendFormat": "{{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "ESTIMATE, both backends. 4096 / prefill_tokens_per_sec. Removes prompt-length differences. Excludes queueing.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 2
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 4,
+          "title": "Prefill throughput",
+          "type": "stat",
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 0
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:prefill_tokens_per_sec:rate5m",
+              "legendFormat": "{{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "Tokens/sec during prompt processing. LIKE-FOR-LIKE across backends.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area"
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 10,
+          "title": "Modelled TTFT @ 4k prompt \u2014 Spark vs pedrogpt",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:ttft_modelled_seconds:at_4k",
+              "legendFormat": "{{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "THE COMPARISON. Both backends normalised to a 4096-token prompt so prompt-length differences do not distort it. This is a MODEL derived from prefill throughput, not a measured TTFT, and excludes queueing on both sides.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 2
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 11,
+          "title": "Prefill throughput (tokens/sec)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 4
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:prefill_tokens_per_sec:rate5m",
+              "legendFormat": "{{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "Like-for-like: tokens processed per second during prefill. The underlying quantity behind the modelled TTFT.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 20,
+          "title": "Decode throughput (tokens/sec)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 0,
+            "y": 13
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:decode_tokens_per_sec:rate5m",
+              "legendFormat": "{{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "Generation speed after the first token. For qwen3.6-27b-mtp this includes the MTP speculative-decoding speedup.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 1
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 21,
+          "title": "vLLM measured TTFT (avg / p50 / p95)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 9,
+            "w": 12,
+            "x": 12,
+            "y": 13
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:ttft_seconds:avg",
+              "legendFormat": "avg {{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:ttft_seconds:p50",
+              "legendFormat": "p50 {{`{{model}}`}}",
+              "refId": "B",
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:ttft_seconds:p95",
+              "legendFormat": "p95 {{`{{model}}`}}",
+              "refId": "C",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "Real per-request TTFT \u2014 vLLM only. llama.cpp exposes no TTFT metric, which is why the cross-backend panel uses a model.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 2
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 30,
+          "title": "Mean prefill time per request",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 22
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:prefill_seconds:avg",
+              "legendFormat": "{{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "Comparable across backends (both exclude queueing), but NOT normalised for prompt length \u2014 these models see very different prompt sizes.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 3
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 31,
+          "title": "vLLM queue time (avg)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 22
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "llm:queue_seconds:avg",
+              "legendFormat": "{{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "Queueing delay on the Ray cluster \u2014 the part of TTFT the llama.cpp model cannot see.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 3
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 32,
+          "title": "Scrape health",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 22
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "up{job=~\"llama-cpp|vllm\"}",
+              "legendFormat": "{{`{{job}}`}} {{`{{model}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "EXPECTED: the idle pedrogpt model reads 0. Only one model fits in 32GB VRAM, and scrapes use autoload=false so Prometheus cannot force-load ~18 GB.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": [
+        "pedro-ops",
+        "llm",
+        "latency"
+      ],
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "current": {
+              "text": "Prometheus",
+              "value": "Prometheus"
+            }
+          }
+        ]
+      },
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "refresh": "30s",
+      "title": "LLM Latency: Spark vs pedrogpt",
+      "uid": "llm-latency-cmp",
+      "version": 1
+    }
