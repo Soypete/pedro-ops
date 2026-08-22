@@ -370,6 +370,11 @@ func mean(v []float64) float64 {
 	return s / float64(len(v))
 }
 
+// percentile uses linear interpolation between the two nearest ranks over the RAW
+// samples. Note this is a different estimator from Prometheus's histogram_quantile,
+// which interpolates within pre-defined histogram buckets — so a p95 printed here and
+// a p95 from the Grafana dashboard will not match exactly even on identical traffic.
+// Both are valid; do not treat a discrepancy between them as a bug.
 func percentile(v []float64, p float64) float64 {
 	if len(v) == 0 {
 		return 0

@@ -15,7 +15,18 @@
       llamacpp:prompt_seconds_total / llamacpp:prompt_tokens_total
 
   Therefore:
-    * llm:prefill_tokens_per_sec  is like-for-like (throughput both sides).
+    * llm:prefill_tokens_per_sec  is NOT like-for-like. The vLLM side filters to
+                                  prompt_tokens_by_source{source="local_compute"} so
+                                  prefix-cache hits are excluded, but llama.cpp exposes
+                                  no cached-token breakdown at all — only a single
+                                  prompt_tokens_total that INCLUDES cache hits. With
+                                  prompt caching on (it is), the llama.cpp figure is
+                                  inflated by cached tokens that were never prefilled,
+                                  the same way the vLLM figure was before it was
+                                  filtered. Treat cross-backend prefill numbers as
+                                  DIRECTIONAL ONLY and prefer the client-side harness
+                                  in scripts/pedrogpt/benchmark/compare for real
+                                  comparisons.
     * llm:prefill_seconds:avg     is like-for-like IF you compare vLLM's
                                   request_prefill_time (not its TTFT), since
                                   llama.cpp's number excludes queueing too.
@@ -51,6 +62,11 @@ spec:
         # ---------------------------------------------------------------
         # Prefill (prompt-processing) throughput, tokens/sec. LIKE-FOR-LIKE.
         # ---------------------------------------------------------------
+        # CAVEAT: prompt_tokens_total includes prefix-cache hits, which are never
+        # actually prefilled, so this OVERSTATES throughput whenever the prompt cache
+        # is warm. llama.cpp exposes no by-source breakdown (unlike vLLM's
+        # prompt_tokens_by_source), so the cached tokens cannot be filtered out here.
+        # This is why the vLLM rule below is NOT directly comparable to this one.
         - record: llm:prefill_tokens_per_sec:rate5m
           expr: |
             sum by (instance, model) (rate(llamacpp:prompt_tokens_total[5m]))
