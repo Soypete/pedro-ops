@@ -62,9 +62,10 @@ curl http://100.121.229.114:8000/health
 curl http://100.121.229.114:8000/v1/models | jq '.data[].id'
 ```
 
-Expected output:
+Expected output (router mode serves both):
 ```
 "qwen3.6-27b-mtp"
+"qwen3.8-27b"
 ```
 
 ---

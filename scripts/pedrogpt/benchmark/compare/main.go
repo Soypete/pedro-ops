@@ -123,6 +123,11 @@ type streamChunk struct {
 		CompletionTokens int `json:"completion_tokens"`
 		PromptTokens     int `json:"prompt_tokens"`
 	} `json:"usage"`
+	// Both servers can stream an error object mid-stream rather than failing the
+	// HTTP status, so the status check alone does not catch every failure.
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
 type runResult struct {
@@ -266,6 +271,12 @@ func runOnce(client *http.Client, be backend, prompt string, maxTokens int) runR
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue // keepalives / partial lines
+		}
+		// A streamed error (e.g. {"error":{"message":"model not found"}}) parses as a
+		// chunk with no choices. Surface it instead of letting the loop finish and
+		// report the misleading "no content received".
+		if chunk.Error != nil && chunk.Error.Message != "" {
+			return runResult{err: fmt.Errorf("server error: %s", chunk.Error.Message)}
 		}
 		if firstToken.IsZero() && len(chunk.Choices) > 0 {
 			d := chunk.Choices[0].Delta
