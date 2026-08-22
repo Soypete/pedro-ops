@@ -1,0 +1,101 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pedro-observability
+  namespace: monitoring
+  labels:
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: availability
+      rules:
+        # llama-cpp is deliberately EXCLUDED here and handled by the rule below.
+        # pedrogpt runs a router with --models-max 1: only one model is resident, and
+        # scrapes pass autoload=false so Prometheus cannot force-load ~18 GB. The idle
+        # model therefore returns HTTP 400 and up == 0 as NORMAL steady state — every
+        # model switch would otherwise fire a critical page.
+        - alert: PedroTargetDown
+          expr: up{job=~"node-exporter|dcgm-exporter|openbao|kei-.*|pedro-.*|postgres-exporter.*|redis-exporter"} == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "Prometheus target is down"
+            description: "{{`{{ $labels.job }}`}} on {{`{{ $labels.instance }}`}} has been unreachable for five minutes."
+        # Fires only when NO llama-cpp model on the host is scrapeable, i.e. the router
+        # itself is gone — not when a model is merely evicted. Router reachability is
+        # also covered by the /health blackbox probe.
+        - alert: PedroLlamaCppDown
+          expr: sum by (instance) (up{job="llama-cpp"}) == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "No llama.cpp model is reachable"
+            description: "Every llama-cpp scrape target on {{`{{ $labels.instance }}`}} has been down for five minutes; the router process is likely not running."
+        - alert: PedroProbeFailed
+          expr: probe_success == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "Service probe failed"
+            description: "{{`{{ $labels.instance }}`}} has failed its blackbox probe for five minutes."
+        - alert: PedroPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total[15m]) >= 3
+          labels: {severity: warning}
+          annotations:
+            summary: "Container is repeatedly restarting"
+            description: "{{`{{ $labels.namespace }}`}}/{{`{{ $labels.pod }}`}} restarted at least three times in 15 minutes."
+    - name: databases
+      rules:
+        - alert: PostgresExporterError
+          expr: pg_up == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations: {summary: "PostgreSQL exporter cannot query its database"}
+        - alert: PostgresConnectionsHigh
+          expr: sum by (instance) (pg_stat_activity_count) / clamp_min(sum by (instance) (pg_settings_max_connections), 1) > 0.8
+          for: 10m
+          labels: {severity: warning}
+          annotations: {summary: "PostgreSQL connections exceed 80 percent"}
+        - alert: RedisExporterDown
+          expr: redis_up == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations: {summary: "Redis exporter cannot query Redis"}
+    - name: inference
+      rules:
+        - alert: PedrogptGPUHot
+          expr: DCGM_FI_DEV_GPU_TEMP > 85
+          for: 5m
+          labels: {severity: warning}
+          annotations: {summary: "pedrogpt GPU temperature is above 85C"}
+        - alert: PedrogptGPUMemoryPressure
+          expr: DCGM_FI_DEV_FB_USED / clamp_min(DCGM_FI_DEV_FB_FREE + DCGM_FI_DEV_FB_USED, 1) > 0.95
+          for: 10m
+          labels: {severity: warning}
+          annotations: {summary: "pedrogpt GPU memory exceeds 95 percent"}
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: discord
+  namespace: monitoring
+  labels:
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+spec:
+  route:
+    receiver: discord
+    groupBy: [alertname, namespace, service]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    matchers:
+      - name: severity
+        matchType: =~
+        value: warning|critical
+  receivers:
+    - name: discord
+      discordConfigs:
+        - apiURL:
+            name: {{ .Values.discord.secretName }}
+            key: {{ .Values.discord.secretKey }}
+          sendResolved: true

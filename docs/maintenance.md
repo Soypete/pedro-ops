@@ -266,9 +266,31 @@ kubectl logs -n openwebui --all-containers=true --tail=100 | grep -i error
 
 The GPU inference runs on `100.121.229.114:8000` (pedrogpt.tail6fbc5.ts.net via Tailscale).
 
+llama-server runs in **router mode** serving two models, one resident at a time
+(`--models-max 1` — they do not both fit in 32GB VRAM). Callers select one per request
+via the `"model"` field:
+
+| Model id | Notes |
+|---|---|
+| `qwen3.6-27b-mtp` | default, loads on startup, MTP speculative decoding, ctx 216064 |
+| `qwen3.8-27b` | loads on demand; first request after a switch stalls (~18 GB load) |
+
+Config lives in `scripts/pedrogpt/presets/router.ini`; see `scripts/pedrogpt/presets/README.md`.
+
 ```bash
 # From your local machine (with Tailscale)
-curl http://pedrogpt:8000/v1/models
+curl http://pedrogpt:8000/v1/models          # both ids + load status
+
+# Model residency (pre-warm before a benchmark, or free VRAM)
+scripts/pedrogpt/switch-model.sh --host pedrogpt list
+scripts/pedrogpt/switch-model.sh --host pedrogpt load qwen3.8-27b
+
+# Metrics REQUIRE ?model= in router mode (plain /metrics returns HTTP 400).
+# autoload=false stops a scrape from force-loading an evicted model.
+curl 'http://pedrogpt:8000/metrics?model=qwen3.6-27b-mtp&autoload=false'
+
+# /health needs no ?model=
+curl http://pedrogpt:8000/health
 
 # From a pod in cluster
 kubectl run curl-test --image=curlimages/curl --restart=Never -n openwebui -- curl http://100.121.229.114:8000/v1/models

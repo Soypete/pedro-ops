@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: openwebui-db
+  namespace: openwebui
+  labels:
+    {{- include "pedro-observability.labels" . | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames: [openwebui]
+  selector:
+    matchLabels:
+      cnpg.io/cluster: openwebui-db
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
