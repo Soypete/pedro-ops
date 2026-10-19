@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sort"
@@ -65,6 +66,8 @@ type streamChunk struct {
 	Choices []struct {
 		Delta struct {
 			Content string `json:"content"`
+			// Reasoning models stream their thinking here before any Content arrives.
+			ReasoningContent string `json:"reasoning_content"`
 		} `json:"delta"`
 	} `json:"choices"`
 	Timings *timings `json:"timings"`
@@ -153,9 +156,15 @@ func runOnce(endpoint, model, prompt string, maxTokens int) (runResult, error) {
 		return runResult{}, fmt.Errorf("status %d: %s", resp.StatusCode, b)
 	}
 
+	return readStream(resp.Body, start, time.Now)
+}
+
+// readStream consumes llama-server's SSE stream. TTFT is the time to the first token of any kind,
+// including reasoning tokens, so thinking models do not report a zero TTFT. now is injected for tests.
+func readStream(body io.Reader, start time.Time, now func() time.Time) (runResult, error) {
 	res := runResult{acceptRate: -1}
 	var firstToken time.Time
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -170,8 +179,9 @@ func runOnce(endpoint, model, prompt string, maxTokens int) (runResult, error) {
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue // tolerate keepalives / partial lines
 		}
-		if firstToken.IsZero() && len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			firstToken = time.Now()
+		if firstToken.IsZero() && len(chunk.Choices) > 0 &&
+			(chunk.Choices[0].Delta.Content != "" || chunk.Choices[0].Delta.ReasoningContent != "") {
+			firstToken = now()
 		}
 		if chunk.Timings != nil {
 			res.promptPerSec = chunk.Timings.PromptPerSecond
@@ -186,7 +196,7 @@ func runOnce(endpoint, model, prompt string, maxTokens int) (runResult, error) {
 		return runResult{}, err
 	}
 
-	res.totalMS = float64(time.Since(start).Microseconds()) / 1000
+	res.totalMS = float64(now().Sub(start).Microseconds()) / 1000
 	if !firstToken.IsZero() {
 		res.ttftMS = float64(firstToken.Sub(start).Microseconds()) / 1000
 	}
