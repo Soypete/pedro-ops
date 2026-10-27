@@ -1,6 +1,6 @@
 # pedrogpt Operations Guide
 
-Runtime operations for the llama-server on pedrogpt (100.121.229.114, RTX 5090 / Blackwell sm_120).
+Runtime operations for the llama-server on pedrogpt (pedrogpt, currently 100.93.195.29, RTX 5090 / Blackwell sm_120).
 
 The server runs in **router mode**, serving **two** models. Callers pick one per request via the
 `"model"` field in `/v1/chat/completions`:
@@ -39,7 +39,7 @@ The embeddings sidecar is a CPU-only llama.cpp build (`--embeddings --pooling me
 
 ## Endpoints (chat server)
 
-Base URL: `http://100.121.229.114:8000`
+Base URL: `http://pedrogpt:8000`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -53,13 +53,13 @@ Base URL: `http://100.121.229.114:8000`
 ### Check health
 
 ```bash
-curl http://100.121.229.114:8000/health
+curl http://pedrogpt:8000/health
 ```
 
 ### List registered models
 
 ```bash
-curl http://100.121.229.114:8000/v1/models | jq '.data[].id'
+curl http://pedrogpt:8000/v1/models | jq '.data[].id'
 ```
 
 Expected output (router mode serves both):
@@ -76,7 +76,7 @@ There is one model id: **`qwen3.6-27b-mtp`**. Pass it in the `"model"` field (Op
 
 ```bash
 # Chat / reasoning / coding — one tuned model for everything
-curl http://100.121.229.114:8000/v1/chat/completions \
+curl http://pedrogpt:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-27b-mtp",
@@ -114,7 +114,7 @@ wiring. The split exists because MTP and the embeddings graph can't coexist in o
 Add `"stream": true` to get token-by-token responses:
 
 ```bash
-curl http://100.121.229.114:8000/v1/chat/completions \
+curl http://pedrogpt:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.6-27b-mtp",
@@ -135,14 +135,14 @@ curl http://100.121.229.114:8000/v1/chat/completions \
 ### Check service status
 
 ```bash
-ssh soypete@100.121.229.114
+ssh soypete@pedrogpt
 sudo systemctl status llama-server
 ```
 
 ### Tail live logs
 
 ```bash
-ssh soypete@100.121.229.114 "sudo journalctl -u llama-server -f"
+ssh soypete@pedrogpt "sudo journalctl -u llama-server -f"
 ```
 
 ### Common errors
@@ -160,15 +160,15 @@ ssh soypete@100.121.229.114 "sudo journalctl -u llama-server -f"
 ### Inspect the active systemd config
 
 ```bash
-ssh soypete@100.121.229.114 "systemctl cat llama-server"
+ssh soypete@pedrogpt "systemctl cat llama-server"
 ```
 
 ### Verify the loaded model and MTP
 
 ```bash
-curl http://100.121.229.114:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp
+curl http://pedrogpt:8000/v1/models | jq '.data[].id'   # -> qwen3.6-27b-mtp
 # MTP / spec-decoding shows up in the startup logs:
-ssh soypete@100.121.229.114 "sudo journalctl -u llama-server | grep -i 'spec\|draft\|mtp' | tail"
+ssh soypete@pedrogpt "sudo journalctl -u llama-server | grep -i 'spec\|draft\|mtp' | tail"
 ```
 
 ---
@@ -210,13 +210,13 @@ When picking a model: check [LiveBench](https://livebench.ai) for scores, find a
 ### Restart the service
 
 ```bash
-ssh soypete@100.121.229.114 "sudo systemctl restart llama-server"
+ssh soypete@pedrogpt "sudo systemctl restart llama-server"
 ```
 
 ### View the launch config
 
 ```bash
-ssh soypete@100.121.229.114 "cat /etc/llama-server.env; cat /opt/llama.cpp/run-server.sh"
+ssh soypete@pedrogpt "cat /etc/llama-server.env; cat /opt/llama.cpp/run-server.sh"
 ```
 
 ### Roll back to single-model mode
@@ -247,14 +247,14 @@ In router mode `/metrics` is proxied to the child and **requires** `?model=`; pl
 returns HTTP 400. `/health` is unaffected.
 
 ```bash
-curl 'http://100.121.229.114:8000/metrics?model=qwen3.6-27b-mtp&autoload=false' | grep -E 'llamacpp:'
-curl http://100.121.229.114:8000/health
+curl 'http://pedrogpt:8000/metrics?model=qwen3.6-27b-mtp&autoload=false' | grep -E 'llamacpp:'
+curl http://pedrogpt:8000/health
 ```
 
 ### GPU memory usage
 
 ```bash
-ssh soypete@100.121.229.114 "nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv"
+ssh soypete@pedrogpt "nvidia-smi --query-gpu=memory.used,memory.free,memory.total --format=csv"
 ```
 
 ---

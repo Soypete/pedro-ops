@@ -10,6 +10,15 @@ The live config is **`router.ini`** in this directory, deployed to `/etc/llama-s
 |---|---|---|---|---|---|
 | `qwen3.6-27b-mtp` | Qwen3.6-27B-MTP | UD-Q4_K_XL (~17.9 GB) | yes (baked-in head) | 216064 | yes |
 | `qwen3.8-27b` | Qwen3.8-27B | UD-Q4_K_XL (17.56 GB) | no | 262144 (full native) | no |
+| `muse-glimmer-30b` | Muse Glimmer 30B | UD-Q4_K_XL (~17.8 GB) | no | 131072 | no — **drafted, not deployed** |
+| `nemotron-3.5-lightning` | Nemotron 3.5 Lightning 30B-A3B | UD-Q4_K_XL (~18 GB) | no | 262144 | no — **drafted, not deployed** |
+| `gemma-4-26b-a4b-it` | Gemma 4 26B-A4B (MoE, ~4B active) | UD-Q4_K_M (~15.6 GB) | no | 131072 | no — **drafted, not deployed** |
+| `gemma-4-31b-it` | Gemma 4 31B it | Q4_K_M (17.4 GB) | no | 65536 (unmeasured) | no — **drafted, not deployed** |
+| `clef` | Clef 27B decision model | Q8_0 (28.7 GB) | no | 16384 (unmeasured) | no — **drafted, not deployed**; serves `/v1/systemone`, not chat |
+
+The last five sections in `router.ini` are staged so the models can be downloaded and enabled later.
+Each section's comment holds its `hf download` command. Rebuild llama.cpp past b9802 before deploying
+(Glimmer needs b10353+). See `docs/gpu-models.md`.
 
 Callers pass the id in the `"model"` field of `/v1/chat/completions`. `qwen3.6-27b-mtp` is unchanged
 from single-model mode, so existing callers (OpenWebUI, `benchmark/`, SuperAgentPedro, iam_pedro,

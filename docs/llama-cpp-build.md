@@ -71,7 +71,7 @@ cd scripts/pedrogpt
 Or run directly on pedrogpt:
 
 ```bash
-ssh soypete@100.121.229.114
+ssh soypete@pedrogpt
 cd /opt/llama.cpp
 
 # Pull latest and rebuild (clean build dir first)
@@ -179,16 +179,44 @@ llama-server -m nomic-embed-text.gguf --alias nomic-embed-text \
 ./rebuild-llama-cpp.sh
 
 # Check status
-ssh soypete@100.121.229.114 "sudo systemctl status llama-server"
+ssh soypete@pedrogpt "sudo systemctl status llama-server"
 
 # View logs
-ssh soypete@100.121.229.114 "sudo journalctl -u llama-server -f"
+ssh soypete@pedrogpt "sudo journalctl -u llama-server -f"
 
 # Check GPU
-ssh soypete@100.121.229.114 "nvidia-smi"
+ssh soypete@pedrogpt "nvidia-smi"
 
 # Test embeddings (separate sidecar on :8081, NOT the chat server)
 curl http://localhost:8081/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{"model": "nomic-embed-text", "input": "Hello world"}'
 ```
+
+## Rebuilding while serving (optional)
+
+`rm -rf build` deletes the binary the router spawns every model child from, so model swaps
+fail until the rebuild finishes. To keep serving, build into a second directory and point the
+launcher at it with `LLAMA_BIN` (supported by `run-server.sh`):
+
+```bash
+cd /opt/llama.cpp && git pull
+sudo cmake -B build-next -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=120 \
+  -DGGML_CUDA_FORCE_CUBLAS=OFF -DCUDAToolkit_ROOT=/usr/local/cuda-12.8 \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.8/bin/nvcc
+sudo cmake --build build-next --config Release -j$(nproc)
+grep FORCE_CUBLAS build-next/CMakeCache.txt   # expect OFF
+build-next/bin/llama-server --version
+
+# switch: add this line to /etc/llama-server.env, then restart
+#   LLAMA_BIN=/opt/llama.cpp/build-next/bin/llama-server
+sudo systemctl restart llama-server
+# roll back: delete that line and restart; the old build/ is untouched
+```
+
+Keep the build dir name: the binary's RUNPATH is its absolute build directory, so a built tree
+cannot be renamed into place.
+
+Some models need a newer llama.cpp than b9802: Muse Glimmer needs b10353 or newer, and Clef
+needs the build from PR #29831 (merged to master 2026-10-03). Check the others on the new
+build before relying on them, and re-run `scripts/pedrogpt/benchmark` against `qwen3.8-27b`.

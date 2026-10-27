@@ -44,7 +44,7 @@ ignored.
   kubectl exec -i -n chatbot postgres -- \
     psql -U postgres -d pedro_agentware -v ON_ERROR_STOP=1 -f - < migrations/00N_x.sql
   ```
-- **llama.cpp** — `http://100.121.229.114:8000/v1` (Tailscale GPU box).
+- **llama.cpp** — `http://100.93.195.29:8000/v1` (Tailscale GPU box).
   Note **port 8000**, not 8080.
 - **Secrets** — the `redditwatch-secrets` Secret in the namespace, holding
   the Reddit, Discord, Supabase, and `POSTGRES_URL` values.
