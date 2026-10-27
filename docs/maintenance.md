@@ -264,7 +264,7 @@ kubectl logs -n openwebui --all-containers=true --tail=100 | grep -i error
 
 ### Test Model Backend Connection
 
-The GPU inference runs on `100.121.229.114:8000` (pedrogpt.tail6fbc5.ts.net via Tailscale).
+The GPU inference runs on `100.93.195.29:8000` (pedrogpt.tail6fbc5.ts.net via Tailscale).
 
 llama-server runs in **router mode** serving two models, one resident at a time
 (`--models-max 1` — they do not both fit in 32GB VRAM). Callers select one per request
@@ -293,7 +293,7 @@ curl 'http://pedrogpt:8000/metrics?model=qwen3.6-27b-mtp&autoload=false'
 curl http://pedrogpt:8000/health
 
 # From a pod in cluster
-kubectl run curl-test --image=curlimages/curl --restart=Never -n openwebui -- curl http://100.121.229.114:8000/v1/models
+kubectl run curl-test --image=curlimages/curl --restart=Never -n openwebui -- curl http://100.93.195.29:8000/v1/models
 
 # Check OpenWebUI can reach the backend (look for connection errors in logs)
 kubectl logs -n openwebui deploy/openwebui-open-webui | grep -i "connection\|error\|failed"
@@ -302,8 +302,8 @@ kubectl logs -n openwebui deploy/openwebui-open-webui | grep -i "connection\|err
 ### Common Issues
 
 **"Server Connection Error" in OpenWebUI UI:**
-- Check that `OPENAI_API_BASE_URL` is set to IP address (not hostname): `http://100.121.229.114:8000/v1`
-- Verify model backend is running: `curl http://100.121.229.114:8000/v1/models`
+- Check that `OPENAI_API_BASE_URL` is set to IP address (not hostname): `http://100.93.195.29:8000/v1`
+- Verify model backend is running: `curl http://100.93.195.29:8000/v1/models`
 - Check pods can resolve DNS (may need to use IP instead of hostname)
 
 **Chats not saving:**

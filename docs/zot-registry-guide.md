@@ -269,7 +269,7 @@ kubectl patch deployment/<name> -n <namespace> -p '{"spec":{"template":{"spec":{
 
 Pods may crash if required env vars are missing. Add them:
 ```bash
-kubectl patch deployment/<name> -n <namespace> -p '{"spec":{"template":{"spec":{"containers":[{"name":"<container>","env":[{"name":"LLAMA_CPP_BASE_URL","value":"http://100.121.229.114:8080"}]}]}}}}'
+kubectl patch deployment/<name> -n <namespace> -p '{"spec":{"template":{"spec":{"containers":[{"name":"<container>","env":[{"name":"LLAMA_CPP_BASE_URL","value":"http://100.93.195.29:8080"}]}]}}}}'
 ```
 
 ### Database Connection Errors
