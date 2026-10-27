@@ -52,7 +52,7 @@ table maps the old `run-server.sh` invocation onto the new layout — use it whe
 | `--ctx-size` | section | per model |
 | `--n-gpu-layers`, `--parallel` | section | per model |
 | `--batch-size`, `--ubatch-size` | section | per model |
-| `--mlock` | section | **model 1 only** (see below) |
+| `--mlock` (b9802) / `--load-mode mmap+mlock` (0.7.0-dev, build 11913+) | section | **model 1 only** (see below). Newer builds reject `mlock` in a preset with `option 'mlock' not recognized`, and the router then refuses to start. |
 | `--cache-type-k` / `-v` | section | per model |
 | `--spec-type`, `--spec-draft-n-max` | section | **model 1 only** |
 | `--cache-type-k-draft` / `-v-draft` | section | model 1 only |
