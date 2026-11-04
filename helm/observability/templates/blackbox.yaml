@@ -71,7 +71,7 @@ spec:
         - http://moonshine-stt.moonshine.svc.cluster.local:8000/health
         - http://credential-admin.kei.svc.cluster.local/health
         - http://registry.default.svc.cluster.local:5000/v2/
-        - http://100.121.229.114:8000/health
+        - http://{{ .Values.externalTargets.llama }}/health
       labels: {monitoring_role: application}
 ---
 apiVersion: monitoring.coreos.com/v1

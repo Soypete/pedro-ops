@@ -2,7 +2,10 @@
 # Run on pedrogpt. Publishes host and GPU metrics on the Tailscale address only.
 set -euo pipefail
 
-TS_IP="${PEDROGPT_TS_IP:-100.93.195.29}"
+# Default to the live tailscale0 address: the IP changes when the node is
+# re-registered (it was 100.121.229.114; now 100.93.195.29).
+TS_IP="${PEDROGPT_TS_IP:-$( (tailscale ip -4 2>/dev/null || true) | head -n1)}"
+[ -n "$TS_IP" ] || { echo "ERROR: no Tailscale IPv4; set PEDROGPT_TS_IP" >&2; exit 1; }
 NODE_IMAGE="${NODE_EXPORTER_IMAGE:-quay.io/prometheus/node-exporter:v1.8.2}"
 DCGM_IMAGE="${DCGM_EXPORTER_IMAGE:-nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04}"
 
