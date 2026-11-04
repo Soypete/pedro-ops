@@ -44,7 +44,12 @@ fi
 # Do NOT add per-model tuning flags below. CLI args outrank preset sections and would be
 # applied to EVERY model: --spec-type in particular would crash the non-MTP model.
 # Add such flags to the model's section in $MODELS_PRESET instead.
-exec /opt/llama.cpp/build/bin/llama-server \
+#
+# LLAMA_BIN (from $ENV_FILE) selects which build runs; unset means the live build below.
+# It lets a new llama.cpp build sit beside the working one (see docs/llama-cpp-build.md,
+# "Rebuilding while serving") and be reverted by deleting one line. Router children are
+# spawned from this same binary, so the whole stack moves together.
+exec "${LLAMA_BIN:-/opt/llama.cpp/build/bin/llama-server}" \
     --host 0.0.0.0 \
     --port "${PORT:-8000}" \
     --models-preset "$MODELS_PRESET" \

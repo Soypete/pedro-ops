@@ -113,6 +113,7 @@ pedro-ops/
 │   ├── architecture.md        # Architecture documentation
 │   ├── storage-setup.md       # Storage configuration and LVM setup
 │   ├── troubleshooting.md     # Common issues and solutions
+│   ├── gpu-models.md          # GPU backends, MagicDNS addressing, Spark recipe swaps
 │   └── tailscale-setup.md     # Tailscale setup details
 └── .github/
     └── workflows/              # CI/CD workflows
