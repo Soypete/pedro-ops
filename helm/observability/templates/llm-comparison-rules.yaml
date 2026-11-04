@@ -1,7 +1,7 @@
 {{- /*
   Recording rules comparing the two inference backends driven from opencode:
 
-    job="vllm"      Spark / Ray cluster  (MiniMax-M2.5-AWQ)
+    job="vllm"      Spark vLLM cluster   (GLM-5.3-Flash-FP4)
     job="llama-cpp" pedrogpt             (qwen3.6-27b-mtp, qwen3.8-27b)
 
   MEASUREMENT ASYMMETRY — read before quoting these numbers.

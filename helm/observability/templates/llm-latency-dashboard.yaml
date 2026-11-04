@@ -31,7 +31,7 @@ data:
       },
       "editable": true,
       "graphTooltip": 1,
-      "description": "Compares inference latency between the Spark/Ray vLLM cluster (MiniMax-M2.5-AWQ) and pedrogpt llama.cpp (Qwen3.6-27B-MTP, Qwen3.8-27B), as driven from opencode. NOTE: vLLM reports true TTFT histograms; llama.cpp reports only cumulative counters and has no TTFT metric, so cross-backend TTFT is modelled from prefill throughput at a fixed prompt length.",
+      "description": "Compares inference latency between the Spark vLLM cluster (GLM-5.3-Flash-FP4) and pedrogpt llama.cpp (Qwen3.6-27B-MTP, Qwen3.8-27B), as driven from opencode. NOTE: vLLM reports true TTFT histograms; llama.cpp reports only cumulative counters and has no TTFT metric, so cross-backend TTFT is modelled from prefill throughput at a fixed prompt length.",
       "panels": [
         {
           "datasource": {
@@ -674,6 +674,230 @@ data:
           "fieldConfig": {
             "defaults": {
               "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 33,
+          "title": "vLLM time per output token (avg / p95)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 30
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (model_name) (rate(vllm:request_time_per_output_token_seconds_sum[5m])) / clamp_min(sum by (model_name) (rate(vllm:request_time_per_output_token_seconds_count[5m])), 0.001)",
+              "legendFormat": "avg {{`{{model_name}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "histogram_quantile(0.95, sum by (le, model_name) (rate(vllm:request_time_per_output_token_seconds_bucket[5m])))",
+              "legendFormat": "p95 {{`{{model_name}}`}}",
+              "refId": "B",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "vllm:request_time_per_output_token_seconds \u2014 per-request decode pace seen by one client (1/TPOT = tok/s per request). Rises with batch size: every extra running request slows the others.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 3
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 34,
+          "title": "vLLM requests running / waiting",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 30
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (model_name) (vllm:num_requests_running)",
+              "legendFormat": "running {{`{{model_name}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (model_name) (vllm:num_requests_waiting)",
+              "legendFormat": "waiting {{`{{model_name}}`}}",
+              "refId": "B",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "vllm:num_requests_running and vllm:num_requests_waiting. A sustained waiting queue is what pushes TTFT up; with --scheduling-policy priority, low-priority-value (interactive) requests jump this queue.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": true
+              },
+              "color": {
+                "mode": "palette-classic"
+              },
+              "decimals": 0
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "mean",
+                "max",
+                "lastNotNull"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "id": 35,
+          "title": "vLLM token throughput (tokens/sec)",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 30
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (model_name) (rate(vllm:prompt_tokens_total[5m]))",
+              "legendFormat": "prompt {{`{{model_name}}`}}",
+              "refId": "A",
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (model_name) (rate(vllm:prompt_tokens_by_source_total{source=\"local_compute\"}[5m]))",
+              "legendFormat": "prompt computed {{`{{model_name}}`}}",
+              "refId": "B",
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (model_name) (rate(vllm:generation_tokens_total[5m]))",
+              "legendFormat": "generation {{`{{model_name}}`}}",
+              "refId": "C",
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "description": "Aggregate server throughput: vllm:prompt_tokens_total (incl. prefix-cache hits), the local_compute share actually prefilled, and vllm:generation_tokens_total.",
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
               "custom": {
                 "lineWidth": 2,
                 "fillOpacity": 8,

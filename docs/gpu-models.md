@@ -118,6 +118,42 @@ cd scripts/pedrogpt/benchmark && go run . -url http://spark-f5ea:8000/v1 \
 Rollback is the same swap: point `START_SCRIPT` back at the previous wrapper.
 Cached weights stay on both nodes.
 
+## Priority scheduling on the Spark (GLM)
+
+Many clients share the Spark vLLM, and the GLM recipe caps `max_num_seqs` at 4:
+at most four requests decode at once and the rest wait. Under the default FCFS
+policy an interactive chat waits behind whatever batch traffic arrived first
+(mean TTFT was ~20 s with ~46k requests served).
+
+`start-cluster-glm.sh` (dotfiles `spark-vllm/`) therefore starts vLLM with
+`--scheduling-policy priority`, passed through `run-recipe.sh ... -- <args>` so
+the upstream recipe stays unforked. Each request may carry an integer `priority`:
+
+- **Lower value = served first.** The default is `0`; ties go by arrival time.
+- **Interactive clients send a high priority, i.e. a negative value** — `-10`.
+  This covers the Open WebUI models people chat with (the go/analytics
+  "Ask why" model): set a custom parameter `priority` = `-10` in the model's
+  Advanced Params so it is sent in the request body. From the OpenAI SDK:
+  `extra_body={"priority": -10}`.
+- **Batch clients (evals, workers, benchmarks) send nothing** and keep `0`.
+  Something that should yield to everything else can send a positive value.
+
+What it does and does not buy: a priority request jumps to the front of the
+*waiting* queue, so it takes the next free slot instead of the last. It does not
+make decode faster, and running requests are preempted only when the KV cache runs
+out, so an interactive request can still wait for one of the four running slots to
+finish. Watch `vllm:num_requests_waiting` and TTFT on the "LLM Latency" Grafana
+dashboard to judge the effect.
+
+**Client rollout order.** The vLLM build on the Spark (`vllm-0.1.dev21830+g8244d1c44`,
+2026-10-26) accepts a `priority` field while running FCFS and ignores it (measured
+2026-11-04: HTTP 200), so clients can start sending it before or after the restart.
+Older vLLM releases instead reject a non-zero `priority` under FCFS with HTTP 400:
+re-check this before rolling back to an older container. Because the field is ignored
+under FCFS, a 200 response does not prove the policy is active; check the startup log
+for `scheduling_policy` instead. The restart and verification steps are in dotfiles
+`spark-vllm/RUNBOOK.md`, "Priority scheduling (GLM)".
+
 ## Related
 
 - `scripts/pedrogpt/README.md`: pedrogpt operations (router mode, presets)

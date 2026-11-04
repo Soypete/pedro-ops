@@ -6,12 +6,20 @@ images:
   redisExporter: oliver006/redis_exporter:v1.67.0
 
 externalTargets:
-  llama: 100.121.229.114:8000
-  # Ray/vLLM cluster (Spark). Exposes vllm:* metrics including a true
-  # time_to_first_token_seconds histogram.
-  ray: 100.87.122.109:8000
-  node: 100.121.229.114:9100
-  dcgm: 100.121.229.114:9400
+  # Tailscale IPs, not MagicDNS names. The owner's convention is names
+  # (spark-f5ea:8000, pedrogpt:8000) because IPs change when a node is
+  # re-registered -- the previous 100.87.122.109 (Spark) and 100.121.229.114
+  # (pedrogpt) are dead for exactly that reason. Switch to names once it is
+  # confirmed that Prometheus pods resolve tailnet hostnames: pods use CoreDNS,
+  # which does not forward ts.net/MagicDNS (see
+  # scripts/pedrogpt/llama-cpp-scrapeconfig.yaml). Refresh with `tailscale status`.
+  # pedrogpt llama-server (router mode).
+  llama: 100.93.195.29:8000
+  # Spark vLLM (GLM-5.3-Flash-FP4). Exposes vllm:* metrics at /metrics (NOT
+  # /v1/metrics), including a true time_to_first_token_seconds histogram.
+  ray: 100.94.89.57:8000
+  node: 100.93.195.29:9100
+  dcgm: 100.93.195.29:9400
   openbao: 100.70.90.12:8200
 
 # Models served by llama-server on pedrogpt (router mode). One ScrapeConfig is
