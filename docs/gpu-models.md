@@ -70,8 +70,8 @@ Recipes of interest (see `./run-recipe.sh --list` for the full set):
 
 | Recipe | Notes |
 |---|---|
-| `deepseek-v4-flash-0731` | current default; 284B MoE, ~167GB, tp=2, 500k ctx |
-| `glm-5.3-flash` | candidate; `nvidia/GLM-5.3-Flash-FP4-Local`, 320B/18B-active MoE, ~166GiB, tp=2, 500k ctx, MTP, B12X container (experimental) |
+| `glm-5.3-flash` | **current default** (`start-cluster-glm.sh`); `nvidia/GLM-5.3-Flash-FP4-Local`, 320B/18B-active MoE, ~166GiB, tp=2, 500k ctx, MTP, B12X container (experimental) |
+| `deepseek-v4-flash-0731` | previous default; 284B MoE, ~167GB, tp=2, 500k ctx |
 | `minimax-m2-awq` | known-good fallback, weights cached |
 | `deepseek-v4.1-flash` | **3x/4x Spark clusters only**: 510GB FP8, does not fit 2 nodes |
 
@@ -96,6 +96,35 @@ space on both nodes if needed:
 ./hf-download.sh --list -c               # models and sizes per node
 ./hf-download.sh --cleanup -c            # drop unreferenced revisions
 ```
+
+> The upstream README's 2026-09-04 changelog entry for `glm-5.3-flash` describes
+> the recipe's first version (`local-inference-lab/GLM-5.3-Flash-NVFP4-Spark`).
+> Upstream moved the recipe to `nvidia/GLM-5.3-Flash-FP4-Local` on 2026-10-16;
+> trust `recipes/glm-5.3-flash.yaml`, not the changelog.
+
+### Refreshing the B12X image
+
+The B12X recipes are experimental and upstream changes them often (memory-leak
+fixes, loader changes, `PYTORCH_ALLOC_CONF` caps). Recipe changes arrive with a
+`git pull`; container fixes need a new image. `--build-only --force-build` pulls
+the prebuilt `eugr/spark-vllm-b12x:latest` image and copies it to the worker,
+and it can run while the server is still serving:
+
+```bash
+cd ~/spark-vllm-docker && git pull --ff-only
+docker images vllm-node-b12x --format '{{.ID}}'      # note the old image id
+./run-recipe.sh glm-5.3-flash -n 192.168.100.10,192.168.100.11 --build-only --force-build
+sudo systemctl restart vllm-cluster                   # picks up the new image + recipe
+```
+
+The pull and copy took ~6 minutes (2026-11-09); the restart drops in-flight
+requests and GLM takes ~11 minutes to load before `/v1/models` answers. Confirm the
+new settings in `journalctl -u vllm-cluster` (`non-default args` line) and the
+container env (`docker inspect`).
+
+After `/v1/models` answers and a benchmark looks right, remove the old image on
+**both** nodes to reclaim ~18GB each: `docker rmi <old-id>` on spark-f5ea, then
+the same over `ssh 192.168.100.11`.
 
 After the swap, update the model id in the OpenCode provider entry. Recipes
 that do not set `served-model-name` serve under the HF repo id
