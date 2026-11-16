@@ -140,9 +140,12 @@ frees KV memory, which can go to more concurrent sequences. Keep
 
 ```bash
 curl -s http://spark-f5ea:8000/v1/models | jq '.data[].id'
-cd scripts/pedrogpt/benchmark && go run . -url http://spark-f5ea:8000/v1 \
-  -model nvidia/GLM-5.3-Flash-FP4-Local -n 10      # tok/s and TTFT
+cd scripts/spark-vllm-bench && python3 decode_bench.py   # decode tok/s and TTFT
 ```
+
+Use `scripts/spark-vllm-bench/`, not `scripts/pedrogpt/benchmark`: the latter reads
+llama.cpp's `timings` and shows zeros against vLLM. Recorded results are in
+`docs/spark-vllm-troubleshooting.md`.
 
 Rollback is the same swap: point `START_SCRIPT` back at the previous wrapper.
 Cached weights stay on both nodes.
@@ -188,4 +191,5 @@ for `scheduling_policy` instead. The restart and verification steps are in dotfi
 - `scripts/pedrogpt/README.md`: pedrogpt operations (router mode, presets)
 - `scripts/pedrogpt/presets/README.md`: llama.cpp flag mapping
 - `docs/tailscale-setup.md`: Tailscale operator and ACL
+- `docs/spark-vllm-troubleshooting.md`: Spark triage (QSFP link down, hung worker) and GLM benchmarks
 - dotfiles `spark-vllm/RUNBOOK.md`: Spark start/restart, QSFP, troubleshooting
